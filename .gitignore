@@ -1,0 +1,19 @@
+# data, results and logs stay on the cluster
+data/
+runs/
+logs/
+.pydeps/
+__pycache__/
+*.pyc
+
+# slide figures and renders are regenerated (see slides/make_assets.sh); the PDF is tracked
+slides/assets/
+slides/assets_arial/
+slides/render/
+slides/*_v1.*
+slides/*.pptx
+
+# local files
+viewer/atom_mapping_viewer.html
+umap_omat_subdatasets_no_AM.html
+unreadable_files.txt

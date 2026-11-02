@@ -1,0 +1,382 @@
+<title>Supercell Atom Matching</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: an instrument bench. Controls strip, two camera-linked 3D stages
+   (reference vs result), then the feature-distance matrix that drives the match. */
+:root {
+  --paper: #f3f5f6;
+  --surface: #ffffff;
+  --ink: #15202a;
+  --ink-2: #485663;
+  --muted: #7b8792;
+  --rule: #d9dfe3;
+  --accent: #1d5c8a;
+  --accent-soft: #e2edf5;
+  --wrong: #d03b3b;
+  --equiv: #8a7a3c;
+  --bond: #a3adb5;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
+  --heat-lo: #f7fafc; --heat-hi: #0d3a61;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --step--1: 0.78rem; --step-0: 0.92rem; --step-1: 1.08rem; --step-2: 1.45rem; --step-3: 1.9rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #0f1316; --surface: #161b1f; --ink: #e6ebee; --ink-2: #b2bcc4; --muted: #84909a;
+    --rule: #283037; --accent: #78b0de; --accent-soft: #1c2b38; --wrong: #e66767; --equiv: #c8b36a; --bond: #55606a;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #2f9a2f; --s7: #9085e9; --s8: #e66767;
+    --heat-lo: #161b1f; --heat-hi: #9fd0ff;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0f1316; --surface: #161b1f; --ink: #e6ebee; --ink-2: #b2bcc4; --muted: #84909a;
+  --rule: #283037; --accent: #78b0de; --accent-soft: #1c2b38; --wrong: #e66767; --equiv: #c8b36a; --bond: #55606a;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --s5: #d55181; --s6: #2f9a2f; --s7: #9085e9; --s8: #e66767;
+  --heat-lo: #161b1f; --heat-hi: #9fd0ff;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 400 var(--step-0)/1.5 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1240px; margin: 0 auto; padding-block: 28px 48px; display: grid; gap: 22px; }
+header { display: grid; gap: 6px; }
+.eyebrow { font: 500 var(--step--1)/1 var(--font-data); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+h1 { font: 600 var(--step-3)/1.1 var(--font-display); margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+h2 { font: 600 var(--step-1)/1.2 var(--font-display); margin: 0; letter-spacing: 0.01em; }
+.lede { margin: 0; max-width: 72ch; color: var(--ink-2); }
+.controls { display: grid; gap: 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.row > .label { font: 500 var(--step--1)/1 var(--font-data); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); min-width: 74px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  font: 500 var(--step--1)/1 var(--font-body); color: var(--ink-2); background: transparent;
+  border: 1px solid var(--rule); border-radius: 999px; padding: 7px 11px; cursor: pointer;
+  display: inline-flex; gap: 6px; align-items: baseline;
+}
+.chip small { font: 400 0.7rem/1 var(--font-data); color: var(--muted); }
+.chip:hover { border-color: var(--accent); color: var(--ink); }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.chip[aria-pressed="true"] small { color: var(--surface); opacity: 0.8; }
+.chip:focus-visible, .toggle input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.toggle { display: inline-flex; gap: 6px; align-items: center; color: var(--ink-2); font-size: var(--step--1); cursor: pointer; }
+.toggle input { accent-color: var(--accent); }
+.method-note { margin: 0; color: var(--ink-2); font-size: var(--step--1); max-width: 90ch; }
+.readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.metric { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; display: grid; gap: 2px; }
+.metric .k { font: 500 0.7rem/1.2 var(--font-data); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.metric .v { font: 600 var(--step-2)/1.1 var(--font-display); font-variant-numeric: tabular-nums; }
+.metric .d { font-size: var(--step--1); color: var(--ink-2); }
+.stages { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.stage { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 12px 6px; display: grid; gap: 4px; min-width: 0; }
+.stage p { margin: 0; color: var(--ink-2); font-size: var(--step--1); }
+.plot3d { height: 430px; width: 100%; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: var(--step--1); color: var(--ink-2); }
+.site { display: inline-flex; gap: 6px; align-items: center; cursor: default; font-family: var(--font-data); }
+.dot { width: 13px; height: 13px; border-radius: 50%; display: inline-grid; place-items: center; font: 600 0.55rem/1 var(--font-data); color: #fff; }
+.ring { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--wrong); display: inline-block; }
+.ring.equiv { border-color: var(--equiv); }
+.line { width: 18px; height: 0; border-top: 2px solid var(--bond); display: inline-block; }
+.line.broken { border-color: var(--wrong); }
+.matrix { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 12px 6px; display: grid; gap: 4px; }
+.matrix p { margin: 0; color: var(--ink-2); font-size: var(--step--1); max-width: 95ch; }
+.scroll { overflow-x: auto; }
+#heat { min-width: 560px; }
+.howto { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.howto div { border-top: 2px solid var(--rule); padding-top: 8px; color: var(--ink-2); font-size: var(--step--1); }
+.howto b { display: block; color: var(--ink); font: 600 var(--step-0)/1.3 var(--font-display); margin-bottom: 2px; }
+footer { color: var(--muted); font-size: var(--step--1); }
+code { font-family: var(--font-data); font-size: 0.85em; }
+@media (max-width: 760px) { .stages { grid-template-columns: 1fr; } .plot3d { height: 360px; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">OMat24 · rattled-relax cell → rattled-300 2× supercell</span>
+    <h1>Supercell Atom Matching</h1>
+    <p class="lede">Each small cell is matched atom by atom to its own 2× supercell using UMA or MACE-MH1 atom embeddings. The left view is the answer key: the small cell repeated twice and laid over the supercell. The right view paints every supercell atom with the colour and number of the small-cell atom it was matched to. When the matching is right, the two views look the same.</p>
+  </header>
+
+  <section class="controls" aria-label="Choose a material and matching method">
+    <div class="row"><span class="label">Material</span><div class="chips" id="materials"></div></div>
+    <div class="row"><span class="label">Method</span><div class="chips" id="methods"></div></div>
+    <div class="row"><span class="label">FGW geometry</span><div class="chips" id="kernels">
+      <button class="chip" id="kernel-periodic" data-k="periodic">All periodic images</button>
+      <button class="chip" id="kernel-minimage" data-k="minimage">Nearest image only</button>
+    </div></div>
+    <div class="row">
+      <span class="label">Show</span>
+      <label class="toggle"><input type="checkbox" id="show-bonds" checked> neighbour bonds</label>
+      <label class="toggle"><input type="checkbox" id="show-labels" checked> site numbers</label>
+    </div>
+    <p class="method-note" id="method-note"></p>
+  </section>
+
+  <section class="readout" id="readout" aria-label="Scores for this material and method"></section>
+
+  <section class="stages">
+    <div class="stage">
+      <h2>Answer key</h2>
+      <p>Small cell (<span id="n-small"></span> atoms) repeated ×2 and aligned onto the supercell. Each colour and number is one small-cell atom.</p>
+      <div id="left" class="plot3d" role="img" aria-label="Aligned small cell"></div>
+    </div>
+    <div class="stage">
+      <h2 id="right-title">Matching result</h2>
+      <p>Supercell (<span id="n-large"></span> atoms) painted by the small-cell atom each one was matched to. Drag to rotate; both views move together.</p>
+      <div id="right" class="plot3d" role="img" aria-label="Supercell coloured by matched atom"></div>
+    </div>
+  </section>
+
+  <div class="legend" id="legend" aria-label="Small-cell atoms"></div>
+
+  <section class="matrix">
+    <h2 id="heat-title">Feature distance between atoms</h2>
+    <p id="heat-note"></p>
+    <div class="scroll"><div id="heat"></div></div>
+  </section>
+
+  <section class="howto" aria-label="How to read this page">
+    <div><b>Hover an atom</b>Anywhere: in either 3D view, the matrix, or the legend. The small-cell atom lights up in the answer key and every supercell atom matched to it lights up on the right.</div>
+    <div><b>Rings mark mistakes</b>A red ring is a supercell atom matched to the wrong site. An olive ring is a symmetry-equivalent copy of the right site, which no embedding can tell apart; it is shown only where the parent space group was recovered.</div>
+    <div><b>Bonds show the geometry</b>Grey bonds join neighbours that were matched to neighbours. Red bonds were pulled apart by the matching. Plain OT ignores positions, so it breaks many bonds; FGW adds a penalty for that.</div>
+  </section>
+
+  <footer>Data: 10 OMat24 sr_1m materials, each a rattled-relax cell and its rattled-300 supercell (volume per atom within 5%). Embeddings: UMA <code>uma-s-1p2</code> (128) and MACE <code>mace-mh-1</code> readout (96), z-scored per channel. UMA+MH1 concatenates both, each block scaled by 1/√width so the two models count equally. Plain OT: exact uniform optimal transport. FGW: fused Gromov–Wasserstein, α = <span id="alpha"></span>, with the small cell tiled to supercell size; its geometry term is a Gaussian neighbour kernel summed over all periodic images (or, for comparison, the nearest image only). The rattling moves each atom about 0.6 Å, so even the true match breaks some bonds.</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<script>
+const DATA = /*__DATA__*/null;
+const NOTES = {
+  "True match": "The answer key itself: each supercell atom is painted with the small-cell atom it is a periodic copy of. Both views match exactly. Bonds broken here are broken by the rattling alone, which sets the ceiling for the other methods.",
+  "OT": "Plain optimal transport: each supercell atom goes to the small-cell atom with the most similar embedding, with every small-cell atom used exactly twice. Positions are never consulted.",
+  "FGW": "Fused Gromov–Wasserstein: the same embedding cost, plus a penalty whenever two neighbouring atoms are sent to atoms that are not neighbours.",
+  "GW": "Pure Gromov–Wasserstein on embeddings: an atom is matched only by how far it sits, in embedding space, from the other atoms of its own structure. Atoms are never compared across the two structures and positions are not used, so whole elements can be swapped. In the cross-model versions the two structures are even described by different models."
+};
+const KERNEL_NOTES = {
+  periodic: " Neighbour structure counts every periodic image of each neighbour within range.",
+  minimage: " Neighbour structure counts only the nearest periodic image of each neighbour, which misses 23–66% of neighbours in these thin cells."
+};
+const state = { mat: 0, method: 1, kernel: "periodic", bonds: true, labels: true, hl: null };
+let LABELS = [];
+const currentMethod = m => m.methods.find(x => x.label === LABELS[state.method] && (!x.kernel || x.kernel === state.kernel));
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const siteColor = i => css(`--s${(i % 8) + 1}`);
+const pct = v => `${Math.round(v * 100)}%`;
+const $ = id => document.getElementById(id);
+const plotCfg = { displayModeBar: false, responsive: true };
+let syncing = false;
+
+function buildControls() {
+  $("alpha").textContent = DATA.alpha;
+  $("materials").innerHTML = DATA.materials.map((m, i) =>
+    `<button class="chip" id="mat-${i}" data-i="${i}">${m.formula}<small>${m.small_species.length}→${m.large_species.length}</small></button>`).join("");
+  LABELS = [...new Set(DATA.materials[0].methods.map(m => m.label))];
+  $("methods").innerHTML = LABELS.map((label, i) =>
+    `<button class="chip" id="method-${i}" data-i="${i}">${label}</button>`).join("");
+  $("kernels").onclick = e => { const b = e.target.closest("button"); if (b) { state.kernel = b.dataset.k; state.hl = null; render(); } };
+  $("materials").onclick = e => { const b = e.target.closest("button"); if (b) { state.mat = +b.dataset.i; state.hl = null; render(); } };
+  $("methods").onclick = e => { const b = e.target.closest("button"); if (b) { state.method = +b.dataset.i; state.hl = null; render(); } };
+  $("show-bonds").onchange = e => { state.bonds = e.target.checked; render(); };
+  $("show-labels").onchange = e => { state.labels = e.target.checked; render(); };
+}
+
+function cellEdges(L) {
+  const x = [], y = [], z = [];
+  const c = (i, j, k) => [0, 1, 2].map(a => i * L[0][a] + j * L[1][a] + k * L[2][a]);
+  const pts = [[0,0,0],[1,0,0],[0,1,0],[0,0,1],[1,1,0],[1,0,1],[0,1,1],[1,1,1]];
+  for (let a = 0; a < 8; a++) for (let b = a + 1; b < 8; b++) {
+    const d = pts[a].map((v, k) => Math.abs(v - pts[b][k])).reduce((s, v) => s + v, 0);
+    if (d === 1) { const p = c(...pts[a]), q = c(...pts[b]); x.push(p[0], q[0], null); y.push(p[1], q[1], null); z.push(p[2], q[2], null); }
+  }
+  return { type: "scatter3d", mode: "lines", x, y, z, line: { color: css("--rule"), width: 3 }, hoverinfo: "skip", showlegend: false };
+}
+
+function sceneLayout(m) {
+  const all = m.large.concat(m.aligned);
+  const L = m.lattice;
+  const corners = [];
+  for (const i of [0, 1]) for (const j of [0, 1]) for (const k of [0, 1])
+    corners.push([0, 1, 2].map(a => i * L[0][a] + j * L[1][a] + k * L[2][a]));
+  const pts = all.concat(corners);
+  const rng = a => { const v = pts.map(p => p[a]); const lo = Math.min(...v), hi = Math.max(...v), pad = 0.08 * (hi - lo + 1); return [lo - pad, hi + pad]; };
+  const ax = { visible: false, showgrid: false, zeroline: false, showbackground: false };
+  return {
+    xaxis: { ...ax, range: rng(0) }, yaxis: { ...ax, range: rng(1) }, zaxis: { ...ax, range: rng(2) },
+    aspectmode: "data", bgcolor: css("--surface"),
+    camera: state.camera || { eye: { x: 1.5, y: -1.6, z: 0.9 } },
+  };
+}
+
+function highlightSets(m, method) {
+  // returns {left: Set of aligned site indices, right: Set of supercell atoms} to emphasise
+  const hl = state.hl, truth = m.methods[0].match, match = method.match;
+  if (!hl) return null;
+  const left = new Set(), right = new Set();
+  if (hl.small !== undefined) {
+    truth.forEach((t, j) => { if (t === hl.small) left.add(j); });
+    match.forEach((s, j) => { if (s === hl.small) right.add(j); });
+  }
+  if (hl.large !== undefined) {
+    right.add(hl.large);
+    truth.forEach((t, j) => { if (t === match[hl.large]) left.add(j); });
+  }
+  return { left, right };
+}
+
+function atomTrace(points, siteOf, species, emphasis, hover, labels) {
+  const size = points.map((_, j) => emphasis ? (emphasis.has(j) ? 15 : 7) : 10);
+  const opacity = emphasis ? 0.95 : 1;
+  return {
+    type: "scatter3d", mode: labels ? "markers+text" : "markers",
+    x: points.map(p => p[0]), y: points.map(p => p[1]), z: points.map(p => p[2]),
+    text: siteOf.map(i => `${i + 1}`), textposition: "top center",
+    textfont: { family: "IBM Plex Mono, monospace", size: 11, color: css("--ink") },
+    marker: { size, color: siteOf.map(siteColor), opacity, line: { color: css("--surface"), width: 1 } },
+    hovertext: hover, hoverinfo: "text", showlegend: false,
+  };
+}
+
+function ringTrace(points, idx, color) {
+  return { type: "scatter3d", mode: "markers", x: idx.map(j => points[j][0]), y: idx.map(j => points[j][1]), z: idx.map(j => points[j][2]),
+    marker: { size: 20, symbol: "circle-open", color, line: { color, width: 3 } }, hoverinfo: "skip", showlegend: false };
+}
+
+function bondTraces(m, method) {
+  const kept = { x: [], y: [], z: [] }, broken = { x: [], y: [], z: [] };
+  m.bond_segments.forEach((s, b) => {
+    const t = method.bonds_flags[m.bond_index[b]] ? kept : broken;
+    t.x.push(s[0], s[3], null); t.y.push(s[1], s[4], null); t.z.push(s[2], s[5], null);
+  });
+  return [
+    { type: "scatter3d", mode: "lines", ...kept, line: { color: css("--bond"), width: 4 }, hoverinfo: "skip", showlegend: false },
+    { type: "scatter3d", mode: "lines", ...broken, line: { color: css("--wrong"), width: 6 }, hoverinfo: "skip", showlegend: false },
+  ];
+}
+
+function render() {
+  const m = DATA.materials[state.mat], method = currentMethod(m), truth = m.methods[0].match;
+  const sp = m.small_species, lsp = m.large_species;
+  document.querySelectorAll("#materials .chip").forEach((b, i) => b.setAttribute("aria-pressed", i === state.mat));
+  document.querySelectorAll("#methods .chip").forEach((b, i) => b.setAttribute("aria-pressed", i === state.method));
+  document.querySelectorAll("#kernels .chip").forEach(b => b.setAttribute("aria-pressed", b.dataset.k === state.kernel));
+  $("method-note").textContent = (NOTES[method.label.split(" ")[0]] || NOTES[method.label]) +
+    (method.kernel ? KERNEL_NOTES[method.kernel] : method.label.startsWith("FGW") ? "" : " The FGW geometry setting does not affect this method.");
+  $("n-small").textContent = sp.length; $("n-large").textContent = lsp.length;
+  $("right-title").textContent = `Matching result · ${method.label}` + (method.kernel ? (method.kernel === "periodic" ? " · all images" : " · nearest image") : "");
+
+  const truthM = m.methods[0];
+  const sym = m.orbit ? `space group ${m.spg}` : "symmetry not recovered";
+  $("readout").innerHTML = [
+    ["Exact site", pct(method.exact), `${Math.round(method.exact * lsp.length)} of ${lsp.length} supercell atoms`],
+    ["Same element", pct(method.same_element), "element kept by the match"],
+    ["Bonds kept", pct(method.bonds_kept), `true match keeps ${pct(truthM.bonds_kept)}`],
+    ["Material", m.formula, `${m.parent_id.split("_")[0]} · ${sym}`],
+  ].map(([k, v, d]) => `<div class="metric"><span class="k">${k}</span><span class="v">${v}</span><span class="d">${d}</span></div>`).join("");
+
+  const em = highlightSets(m, method);
+  const leftHover = truth.map((t, j) => `Small-cell atom ${t + 1} (${sp[t]})<br>copy laid over supercell atom ${j + 1}`);
+  const rightHover = method.match.map((s, j) => {
+    const ok = s === truth[j];
+    const eq = !ok && m.orbit && m.orbit[s] === m.orbit[truth[j]];
+    return `Supercell atom ${j + 1} (${lsp[j]})<br>matched to small-cell atom ${s + 1} (${sp[s]})<br>` +
+      (ok ? "✓ true partner" : eq ? `≈ symmetry-equivalent to true partner ${truth[j] + 1}` : `✕ true partner is ${truth[j] + 1} (${sp[truth[j]]})`);
+  });
+  const wrong = [], equiv = [];
+  method.match.forEach((s, j) => {
+    if (s === truth[j]) return;
+    (m.orbit && m.orbit[s] === m.orbit[truth[j]] ? equiv : wrong).push(j);
+  });
+
+  const layout = () => ({ margin: { l: 0, r: 0, t: 0, b: 0 }, paper_bgcolor: css("--surface"), scene: sceneLayout(m),
+    hoverlabel: { bgcolor: css("--surface"), bordercolor: css("--rule"), font: { family: "IBM Plex Sans, sans-serif", color: css("--ink"), size: 12 } } });
+  const leftTraces = [cellEdges(m.lattice), atomTrace(m.aligned, truth, sp, em && em.left, leftHover, state.labels)];
+  const rightTraces = [cellEdges(m.lattice), ...(state.bonds ? bondTraces(m, method) : []),
+    atomTrace(m.large, method.match, lsp, em && em.right, rightHover, state.labels),
+    ringTrace(m.large, wrong, css("--wrong")), ringTrace(m.large, equiv, css("--equiv"))];
+  Plotly.react("left", leftTraces, layout(), plotCfg);
+  Plotly.react("right", rightTraces, layout(), plotCfg);
+
+  $("legend").innerHTML = `<span class="label" style="font:500 0.7rem/1 var(--font-data);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Small-cell atoms</span>` +
+    sp.map((e, i) => `<span class="site" data-i="${i}"><span class="dot" style="background:${siteColor(i)}">${i + 1}</span>${e}</span>`).join("") +
+    `<span class="site"><span class="ring"></span>wrong site</span>` +
+    (m.orbit ? `<span class="site"><span class="ring equiv"></span>symmetry-equivalent</span>` : "") +
+    (state.bonds ? `<span class="site"><span class="line"></span>bond kept</span><span class="site"><span class="line broken"></span>bond broken</span>` : "");
+
+  renderHeat(m, method, truth);
+}
+
+function renderHeat(m, method, truth) {
+  const model = method.model || "UMA";  // GW and the true match do not use this matrix
+  const D = m.distance[model], sp = m.small_species, lsp = m.large_species;
+  $("heat-title").textContent = `Feature distance between atoms · ${model}`;
+  $("heat-note").textContent = "Rows are small-cell atoms, columns are supercell atoms. Darker cells are more similar embeddings. A dot is the match the method chose; an outlined square is the true partner. Plain OT picks the darkest cells it can while using each row exactly twice." +
+    (method.cross_distance ? "" : ` (This method does not use these cross-structure distances; ${model} distances are shown for reference.)`);
+  const rows = sp.map((e, i) => `${i + 1} ${e}`), cols = lsp.map((e, j) => `${j + 1} ${e}`);
+  const heat = { type: "heatmap", z: D, x: cols, y: rows, zmin: 0, zmax: 1, xgap: 2, ygap: 2,
+    colorscale: [[0, css("--heat-hi")], [1, css("--heat-lo")]], showscale: true,
+    colorbar: { title: { text: "distance", font: { size: 11, color: css("--ink-2") } }, thickness: 10, len: 0.9, tickfont: { size: 10, color: css("--ink-2") }, outlinewidth: 0 },
+    hovertemplate: "small-cell atom %{y}<br>supercell atom %{x}<br>feature distance %{z:.2f}<extra></extra>" };
+  const chosen = { type: "scatter", mode: "markers", x: method.match.map((_, j) => cols[j]), y: method.match.map(s => rows[s]),
+    marker: { size: 9, color: method.match.map((s, j) => s === truth[j] ? css("--ink") : css("--wrong")), line: { color: css("--surface"), width: 1.5 } },
+    hoverinfo: "skip", showlegend: false };
+  const partner = { type: "scatter", mode: "markers", x: truth.map((_, j) => cols[j]), y: truth.map(t => rows[t]),
+    marker: { size: 22, symbol: "square-open", color: css("--accent"), line: { width: 2 } }, hoverinfo: "skip", showlegend: false };
+  const h = 70 + 30 * sp.length;
+  Plotly.react("heat", [heat, partner, chosen], {
+    height: h, margin: { l: 60, r: 10, t: 6, b: 54 }, paper_bgcolor: css("--surface"), plot_bgcolor: css("--surface"),
+    font: { family: "IBM Plex Mono, monospace", size: 10, color: css("--ink-2") },
+    xaxis: { side: "bottom", tickangle: -45, showgrid: false, zeroline: false, fixedrange: true },
+    yaxis: { autorange: "reversed", showgrid: false, zeroline: false, fixedrange: true },
+    hoverlabel: { bgcolor: css("--surface"), bordercolor: css("--rule"), font: { color: css("--ink") } },
+  }, plotCfg);
+}
+
+function applyHighlight() {
+  // Hover only resizes markers; the full redraw happens on material/method/toggle changes.
+  const m = DATA.materials[state.mat], method = currentMethod(m);
+  const em = highlightSets(m, method);
+  const sizes = (n, set) => Array.from({ length: n }, (_, j) => set ? (set.has(j) ? 15 : 7) : 10);
+  Plotly.restyle("left", { "marker.size": [sizes(m.aligned.length, em && em.left)] }, [1]);
+  Plotly.restyle("right", { "marker.size": [sizes(m.large.length, em && em.right)] }, [state.bonds ? 3 : 1]);
+}
+
+function wireEvents() {
+  const setHl = hl => { if (JSON.stringify(hl) !== JSON.stringify(state.hl)) { state.hl = hl; applyHighlight(); } };
+  $("left").on("plotly_hover", e => { const p = e.points.find(p => p.data.type === "scatter3d" && p.data.marker && Array.isArray(p.data.marker.color)); if (p) setHl({ small: DATA.materials[state.mat].methods[0].match[p.pointNumber] }); });
+  $("right").on("plotly_hover", e => { const p = e.points.find(p => p.data.hovertext); if (p) setHl({ large: p.pointNumber }); });
+  $("heat").on("plotly_hover", e => { const p = e.points.find(p => p.data.type === "heatmap"); if (p) setHl({ small: p.pointIndex[0], large: p.pointIndex[1] }); });
+  for (const id of ["left", "right", "heat"]) $(id).on("plotly_unhover", () => setHl(null));
+  $("legend").addEventListener("mouseover", e => { const s = e.target.closest(".site[data-i]"); if (s) setHl({ small: +s.dataset.i }); });
+  $("legend").addEventListener("mouseleave", () => setHl(null));
+  for (const [from, to] of [["left", "right"], ["right", "left"]]) {
+    $(from).on("plotly_relayout", ev => {
+      if (syncing || !ev["scene.camera"]) return;
+      state.camera = ev["scene.camera"]; syncing = true;
+      Plotly.relayout(to, { "scene.camera": ev["scene.camera"] }).then(() => { syncing = false; });
+    });
+  }
+}
+
+function boot() {
+  if (!window.Plotly) { document.querySelector(".stages").insertAdjacentHTML("beforebegin", "<p>The 3D views need the Plotly library, which did not load. Check the network connection and reload.</p>"); return; }
+  buildControls(); render(); wireEvents();
+  const rerender = () => render();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", rerender);
+  new MutationObserver(rerender).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+}
+boot();
+</script>
