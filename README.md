@@ -5,7 +5,8 @@ UMA and MACE atom embeddings: what atom embeddings encode, how to match atoms be
 and its supercell with optimal transport and fused Gromov–Wasserstein (FGW), a size-intensive
 structure distance, and a search of 10M OMat24 structures for analogues of MOF-off frameworks.
 
-The results are summarised in [`slides/atom_matching_2026-10-26.pdf`](slides/atom_matching_2026-10-26.pdf).
+The methods and results are described in [`docs/ANALYSIS.md`](docs/ANALYSIS.md) and summarised in
+[`slides/atom_matching_2026-10-26.pdf`](slides/atom_matching_2026-10-26.pdf).
 
 ## Layout
 
