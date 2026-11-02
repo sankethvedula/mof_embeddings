@@ -59,6 +59,7 @@ sbatch slurm/run_python.slurm -m mof_embeddings.structure_distance.analyze_pairw
 | Structure FGW distance | `structure_distance.structure_fgw`, `structure_distance.validate_structure_fgw` | `run_python.slurm` |
 | Pairwise matrices | `structure_distance.build_fgw_sample`, `structure_distance.compute_pairwise_fgw`, `structure_distance.analyze_pairwise_fgw`, `structure_distance.build_grouped_samples`, `structure_distance.plot_grouped_matrices`, `structure_distance.plot_closest_pairs` | `pairwise_fgw.slurm`, `grouped_fgw.slurm` |
 | 10M analogue search | `mof_search.prefilter`, `mof_search.rerank`, `mof_search.compare_subset_terms`, `mof_search.best_per_subset`, `mof_search.aimd_best_match_facts`, `mof_search.mof_neighbours_per_subset`, `mof_search.plot_search_matches`, `mof_search.plot_best_per_subset` | `mof_search.slurm` |
+| Global vectors vs FGW neighbours | `mof_search.global_vs_fgw --stage pool / compare / plot` | `global_pool.slurm`, then `run_python.slurm` |
 
 Every module documents its inputs, outputs and options in its docstring (`--help`).
 

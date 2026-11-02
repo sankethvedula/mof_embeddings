@@ -421,6 +421,48 @@ candidates per query (0.5%; 168,736 distinct structures) were re-ranked with exa
   geometry included, AIMD 3000 K is the protocol closest to MOF-off, largely because its large, dense
   cells resemble MOF cells.
 
+### Global structure vectors versus FGW neighbours (`mof_search.global_vs_fgw`)
+
+**Question.** For the queries whose FGW neighbours were chemically meaningful (Q6 Mn formate,
+Q3 Co, Q4 Cd, Q1 Cu), would global structure vectors have found the same neighbours?
+
+**Method.** Global vectors pool the same z-scored UMA atom features that FGW uses, over all 10M
+sr_10m structures: the Z-weighted mean (the archive's H/ΣZ after per-channel standardisation) and
+the plain mean; the global distance is Euclidean. Unphysical frames are excluded as in the search.
+For each query: rank agreement with FGW over the 50,000 reranked candidates, the global rank (over
+10M) of FGW's top-10 distinct neighbours, and the global method's own neighbours (top-10 distinct
+overall, top-5 distinct per family in AIMD 1000 K, AIMD 3000 K and rattled relax), each scored
+with exact FGW and the same verdict rules as before.
+
+| Query | Spearman with FGW (Z-mean / mean) | Overlap of top-10 (Z-mean / mean) | Median global rank of FGW top-10 (Z-mean) | Sensible, top-10 overall (FGW / Z-mean / mean) | Sensible, per family of 15 (FGW / Z-mean / mean) |
+|---|---|---|---|---|---|
+| Q6 Mn | 0.30 / 0.26 | 0.1 / 0.0 | 27 | 10 / 10 / 8 | 15 / 13 / 10 |
+| Q3 Co | 0.11 / 0.14 | 0.1 / 0.5 | 19 | 5 / 2 / 4 | 9 / 4 / 8 |
+| Q4 Cd | 0.11 / 0.04 | 0.8 / 0.6 | 6 | 6 / 2 / 5 | 8 / 3 / 6 |
+| Q1 Cu | −0.11 / 0.23 | 0.0 / 0.0 | 823,460 | 5 / 0 / 1 | 5 / 0 / 2 |
+
+* Global vectors rank structures very differently from FGW: within the reranked candidates the rank
+  correlation is 0.30 at most and negative for Q1. (The candidates were preselected by an OT-based
+  prefilter, which narrows the range and lowers these correlations.)
+* For small, homogeneous MOFs (the Mn formate) global vectors recover chemically sensible neighbours
+  almost as well as FGW, although at larger FGW distance (median 1.25× the best match for the
+  Z-weighted mean against 1.14× for FGW's own top-10).
+* For the larger, chemically mixed MOFs, global neighbours are mostly "partly" sensible: they share
+  the ligand elements but put the metal on Mg, Na, Li, P or H (for example C₈MgN₆ and C₄H₃NaO₅ for
+  the Co and Cd MOFs). The plain mean does better than the Z-weighted mean here, probably because
+  Z-weighting lets the heavy atoms dominate the average.
+* For Q1 (Cu) the two methods disagree completely. FGW's neighbours rank around 800,000th by global
+  distance, and the Z-weighted mean's nearest structures are small rattled-relax intermetallic cells
+  (BrMoRh, BMoSe₂W, AgITc₃) at 1.7–2.2× the FGW best distance; averaging presumably discards the Cu
+  coordination environment that FGW matches.
+* Conclusion: global vectors are a usable first filter for simple frameworks, but they do not
+  reproduce FGW's chemically meaningful neighbours for mixed-ligand MOFs; the atom-level geometry
+  term is what makes the FGW matches meaningful.
+
+Outputs: `data/mof_search/global_vs_fgw/` (`pairs.csv` with every pair and its verdict, `summary.csv`,
+`verdicts_per_family.csv`, `scatter.png`, `verdicts.png`). Pooled vectors and query distances for all
+10M structures: `$SCRATCH/global_pool/`.
+
 ### Deliverables
 
 * `data/mof_search/aimd_best_matches.csv`: the best AIMD 1000 K and AIMD 3000 K match for each of the
@@ -454,15 +496,14 @@ candidates per query (0.5%; 168,736 distinct structures) were re-ranked with exa
 * Symmetry-equivalent sites are recognised only where the parent space group survives rattling.
 * Uniform atom weights let abundant C and H dominate the transport cost for MOFs.
 * The prefilter misses some top matches for the largest MOFs.
-* No analysis yet compares the neighbour sets given by global (structure-level) embeddings with those
-  given by the atom-wise FGW distance.
+* The global-versus-FGW comparison covers four queries; it should be repeated over more MOFs.
 
 ### Next steps
 
 * Penalise metal-to-non-metal assignments, or weight metal centres, in the transport cost.
 * Extend the matching benchmark to several hundred materials.
 * Score symmetry-equivalent assignments against ideal Alexandria parent structures.
-* Compare k-nearest-neighbour sets from global embeddings (H/ΣZ) and from structure FGW.
+* Use global vectors as a cheaper first-stage filter only for small, homogeneous frameworks.
 * Obtain access to the 468 restricted files.
 
 ---
@@ -480,5 +521,6 @@ candidates per query (0.5%; 168,736 distinct structures) were re-ranked with exa
 | Structure FGW validation (§7) | `structure_distance.validate_structure_fgw` | `data/structure_fgw/validation/` |
 | MOF-off vs OMat24 (§8) | `embeddings.embedding_overlap`, `structure_distance.*` | `data/overlap/`, `data/structure_fgw/` |
 | 10M search (§9) | `mof_search.*`, `structure_distance.build_grouped_samples` | `data/mof_search/`, `data/grouped_fgw/` |
+| Global vectors vs FGW (§9) | `mof_search.global_vs_fgw` | `$SCRATCH/global_pool/`, `data/mof_search/global_vs_fgw/` |
 
 Job scripts for each stage are listed in the [README](../README.md#pipeline).

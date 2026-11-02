@@ -99,6 +99,47 @@ def explain(r):
     return " ".join(parts)
 
 
+def pair_facts(qrow, mof, f1, K1, mof_ch, at, f2, K2, const):
+    """FGW distance and plan-derived facts for one (MOF query, OMat24 structure) pair.
+    qrow: the query's row of queries.csv; f1/f2: z-scored atom features; K1/K2: intensive kernels;
+    mof_ch: the MOF's C-H bond lengths (ch_bonds)."""
+    value, plan = fgw_distance(f1, K1, f2, K2, const["alpha"], const["m0"], return_plan=True)
+    s1 = np.array(mof.get_chemical_symbols()); s2 = np.array(at.get_chemical_symbols())
+    same = float(plan[s1[:, None] == s2[None, :]].sum() / plan.sum())
+    mrow = plan[s1 == qrow.metal].sum(0)
+    mflow = pd.Series(mrow).groupby(s2).sum().sort_values(ascending=False) / mrow.sum()
+    flows = []
+    for e in dict.fromkeys(s1):
+        tot = pd.Series(plan[s1 == e].sum(0)).groupby(s2).sum().sort_values(ascending=False)
+        flows.append(f"{e}->{tot.index[0]} {tot.iloc[0] / tot.sum():.0%}")
+    donors = np.isin(s1, ["N", "O", "S"])
+    acceptors = np.isin(s2, ["N", "O", "S", "F", "Cl", "Br", "I", "P", "Se", "Te"])
+    donor_share = float(plan[np.ix_(donors, acceptors)].sum() / plan[donors].sum()) if donors.any() else np.nan
+    b2 = ch_bonds(at)
+    return dict(
+        fgw=round(value, 4), match_type=compound_type(s2), shared_elements=" ".join(sorted(set(s1) & set(s2))),
+        match_metals=" ".join(sorted(set(s2) - NONMETAL)) or "none",
+        mof_atoms_to_same_element=round(same, 3), mof_donors_to_donors=round(donor_share, 3),
+        metal_main_target=mflow.index[0], metal_main_share=round(float(mflow.iloc[0]), 3),
+        metal_goes_to="; ".join(f"{k} {v:.0%}" for k, v in mflow.head(2).items()),
+        element_flows="; ".join(flows),
+        mof_atoms_per_A3=round(len(mof) / mof.get_volume(), 4), match_atoms_per_A3=round(len(at) / at.get_volume(), 4),
+        mof_CH_median_A=round(float(np.median(mof_ch)), 3) if len(mof_ch) else None,
+        match_CH_median_A=round(float(np.median(b2)), 3) if len(b2) else None)
+
+
+def add_verdicts(df):
+    """Verdict and explanation columns from pair_facts columns (rules in the module docstring)."""
+    on_metal = df.metal_main_target.map(lambda e: e not in NONMETAL) & (df.metal_main_share >= 0.5)
+    same_metal = on_metal & (df.metal_main_target == df.mof_metal)
+    heavy = on_metal & df.metal_main_target.map(lambda e: metal_kind(e) == "transition/heavy metal")
+    same = df.mof_atoms_to_same_element
+    sensible = (same_metal & (same >= 0.35)) | (heavy & (same >= 0.45))
+    df["verdict"] = np.where(sensible, "sensible", np.where(on_metal | (same >= 0.45), "partly", "not chemically meaningful"))
+    df["explanation"] = [explain(r) for r in df.itertuples()]
+    return df
+
+
 def main():
     const = json.loads((OUT / "constants.json").read_text())
     names = json.load(open(L + ".json"))["names"]
@@ -123,7 +164,7 @@ def main():
 
     rows = []
     for qi, qrow in queries.iterrows():
-        mof = qa[qi]; s1 = np.array(mof.get_chemical_symbols()); Kq = kernel(mof); b1 = ch_bonds(mof)
+        mof = qa[qi]; Kq = kernel(mof); b1 = ch_bonds(mof)
         for fam in FAMILIES:
             sub = scores[(scores["query"] == qrow["query"]) & (scores.family == fam)].sort_values("fgw")
             n_frames = sub.groupby("match_formula").size()
@@ -131,45 +172,15 @@ def main():
             for rank, (_, t) in enumerate(top.iterrows(), 1):
                 f = int(t.frame); at = db.get_atoms(id=f + 1)
                 x = (np.asarray(feats[off[f]:off[f + 1]], dtype=np.float64) - mu) / sd
-                value, plan = fgw_distance(qf[qi], Kq, x, kernel(at), const["alpha"], const["m0"], return_plan=True)
-                s2 = np.array(at.get_chemical_symbols())
-                same = float(plan[s1[:, None] == s2[None, :]].sum() / plan.sum())
-                mrow = plan[s1 == qrow.metal].sum(0)
-                mflow = pd.Series(mrow).groupby(s2).sum().sort_values(ascending=False) / mrow.sum()
-                flows = []
-                for e in dict.fromkeys(s1):
-                    tot = pd.Series(plan[s1 == e].sum(0)).groupby(s2).sum().sort_values(ascending=False)
-                    flows.append(f"{e}->{tot.index[0]} {tot.iloc[0] / tot.sum():.0%}")
-                donors = np.isin(s1, ["N", "O", "S"])
-                acceptors = np.isin(s2, ["N", "O", "S", "F", "Cl", "Br", "I", "P", "Se", "Te"])
-                donor_share = float(plan[np.ix_(donors, acceptors)].sum() / plan[donors].sum()) if donors.any() else np.nan
-                b2 = ch_bonds(at)
+                facts = pair_facts(qrow, mof, qf[qi], Kq, b1, at, x, kernel(at), const)
                 rows.append(dict(
                     query=qrow["query"], mof_formula=qrow.formula, mof_metal=qrow.metal, mof_atoms=len(mof),
                     subset_family=fam, rank_in_subset=rank, omat_subset=names[label[f]],
                     match_formula=t.match_formula, match_atoms=len(at), frames_of_this_material=int(n_frames[t.match_formula]),
-                    fgw=round(value, 4), vs_best_for_this_mof=round(value / best_any[qrow["query"]], 3),
-                    match_type=compound_type(s2), shared_elements=" ".join(sorted(set(s1) & set(s2))),
-                    match_metals=" ".join(sorted(set(s2) - NONMETAL)) or "none",
-                    mof_atoms_to_same_element=round(same, 3),
-                    mof_donors_to_donors=round(donor_share, 3),
-                    metal_main_target=mflow.index[0], metal_main_share=round(float(mflow.iloc[0]), 3),
-                    metal_goes_to="; ".join(f"{k} {v:.0%}" for k, v in mflow.head(2).items()),
-                    element_flows="; ".join(flows),
-                    mof_atoms_per_A3=round(len(mof) / mof.get_volume(), 4),
-                    match_atoms_per_A3=round(len(at) / at.get_volume(), 4),
-                    mof_CH_median_A=round(float(np.median(b1)), 3) if len(b1) else None,
-                    match_CH_median_A=round(float(np.median(b2)), 3) if len(b2) else None,
+                    vs_best_for_this_mof=round(facts["fgw"] / best_any[qrow["query"]], 3), **facts,
                     sr10m_frame=f, lmdb_id=f + 1))
         print(f"  {qrow['query']} done", flush=True)
-    df = pd.DataFrame(rows)
-    on_metal = df.metal_main_target.map(lambda e: e not in NONMETAL) & (df.metal_main_share >= 0.5)
-    same_metal = on_metal & (df.metal_main_target == df.mof_metal)
-    heavy = on_metal & df.metal_main_target.map(lambda e: metal_kind(e) == "transition/heavy metal")
-    same = df.mof_atoms_to_same_element
-    sensible = (same_metal & (same >= 0.35)) | (heavy & (same >= 0.45))
-    df["verdict"] = np.where(sensible, "sensible", np.where(on_metal | (same >= 0.45), "partly", "not chemically meaningful"))
-    df["explanation"] = [explain(r) for r in df.itertuples()]
+    df = add_verdicts(pd.DataFrame(rows))
     cols = ["query", "mof_formula", "mof_metal", "mof_atoms", "subset_family", "rank_in_subset", "omat_subset",
             "match_formula", "match_atoms", "frames_of_this_material", "fgw", "vs_best_for_this_mof", "verdict", "explanation",
             "match_type", "shared_elements", "match_metals", "mof_atoms_to_same_element", "mof_donors_to_donors",
