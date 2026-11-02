@@ -25,6 +25,10 @@ Stages
            -> data/mof_search/global_vs_fgw/{pairs.csv, summary.csv, verdicts.csv}
   plot     global distance vs FGW over the candidates, and verdict counts per method
            -> data/mof_search/global_vs_fgw/{scatter.png, verdicts.png}
+  examples one row per query: the MOF, then the two closest distinct neighbours by FGW,
+           by the Z-weighted mean and by the plain mean, each with its FGW distance
+           relative to the best match, verdict and where the MOF's metal goes
+           -> data/mof_search/global_vs_fgw/examples.png
 """
 import argparse
 import glob
@@ -285,9 +289,52 @@ def plot(queries):
     print("saved", RES / "scatter.png", RES / "verdicts.png")
 
 
+def examples(queries, per_method=2):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from ase.db import connect
+    from mof_embeddings.structure_distance.plot_closest_pairs import draw
+    INK, INK2, SURFACE = "#0b0b0b", "#52514e", "#fcfcfb"
+    VERDICT = {"sensible": "#13784f", "partly": "#9a6400", "not chemically meaningful": "#6f6e69"}
+    METHODS = [("FGW", "FGW (atom-wise)"), ("global zmean", "Global vector, Z-weighted mean"),
+               ("global mean", "Global vector, plain mean")]
+    qtab = pd.read_csv(OUT / "queries.csv")
+    pairs = pd.read_csv(RES / "pairs.csv")
+    _, _, qa = query_features(*uma_stats())
+    db = connect(SR10M_LMDB, type="aselmdb", readonly=True)
+    ncol = 1 + per_method * len(METHODS)
+    fig, axes = plt.subplots(len(queries), ncol, figsize=(2.55 * ncol, 3.15 * len(queries)), facecolor=SURFACE,
+                             gridspec_kw=dict(wspace=0.24, hspace=0.62), squeeze=False)
+    for r, q in enumerate(queries):
+        qi = int(np.flatnonzero(qtab["query"] == q)[0])
+        mof = qa[qi]
+        draw(axes[r, 0], mof, "")
+        axes[r, 0].set_title(f"{q} · {qtab.metal[qi]} MOF\n{mof.get_chemical_formula(mode='hill', empirical=True)} ({len(mof)} atoms)",
+                             fontsize=8.5, color=INK, fontweight="semibold", pad=4)
+        for m, (method, _) in enumerate(METHODS):
+            sub = pairs[(pairs["query"] == q) & (pairs.method == method) & (pairs.scope == "overall")].sort_values("rank")
+            for k, t in enumerate(sub.head(per_method).itertuples()):
+                ax = axes[r, 1 + m * per_method + k]
+                draw(ax, db.get_atoms(id=int(t.sr10m_frame) + 1), "")
+                metal = t.metal_goes_to.split(";")[0].replace(" ", " → ", 1) if t.metal_goes_to else ""
+                verdict = "not meaningful" if t.verdict.startswith("not") else t.verdict
+                ax.set_title(f"#{t.rank} {t.match_formula} ({t.match_atoms})\n{t.family} · {t.vs_best_for_this_mof:.2f}× best\n"
+                             f"{qtab.metal[qi]} → {metal.split(' → ')[0]} {metal.split(' → ')[-1] if ' → ' in metal else ''} · {verdict}",
+                             fontsize=7.8, color=VERDICT[t.verdict], pad=4)
+    fig.canvas.draw()
+    for m, (_, label) in enumerate(METHODS):
+        a, b = axes[0, 1 + m * per_method].get_position(), axes[0, m * per_method + per_method].get_position()
+        fig.text((a.x0 + b.x1) / 2, a.y1 + 0.055 / len(queries) * 4, label, ha="center", fontsize=10.5, color=INK, fontweight="semibold")
+    a = axes[0, 0].get_position()
+    fig.text((a.x0 + a.x1) / 2, a.y1 + 0.055 / len(queries) * 4, "Query", ha="center", fontsize=10.5, color=INK, fontweight="semibold")
+    fig.savefig(RES / "examples.png", dpi=140, facecolor=SURFACE, bbox_inches="tight"); plt.close(fig)
+    print("saved", RES / "examples.png")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--stage", choices=["pool", "compare", "plot"], required=True)
+    parser.add_argument("--stage", choices=["pool", "compare", "plot", "examples"], required=True)
     parser.add_argument("--queries", nargs="+", default=["Q6", "Q3", "Q4", "Q1"])
     parser.add_argument("--procs", type=int, default=16)
     parser.add_argument("--chunks", type=int, default=400)
@@ -296,8 +343,10 @@ def main():
         pool(args.procs, args.chunks)
     elif args.stage == "compare":
         compare(args.queries)
-    else:
+    elif args.stage == "plot":
         plot(args.queries)
+    else:
+        examples(args.queries)
 
 
 if __name__ == "__main__":
