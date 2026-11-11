@@ -17,3 +17,8 @@ slides/*.pptx
 viewer/atom_mapping_viewer.html
 umap_omat_subdatasets_no_AM.html
 unreadable_files.txt
+
+# fine-tuning foundation model (copied from Aryan's finetune_method)
+finetune/*.model
+# Aryan's fine-tuning method (shared within the group; not published here)
+finetune/aryan_method/

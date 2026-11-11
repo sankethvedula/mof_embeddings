@@ -18,6 +18,7 @@ same results with one finding per slide. Module names below are relative to `mof
 9. [Search of 10M OMat24 structures for MOF analogues](#9-search-of-10m-omat24-structures-for-mof-analogues)
 10. [Conclusions, limitations and next steps](#10-conclusions-limitations-and-next-steps)
 11. [Where each result comes from](#11-where-each-result-comes-from)
+12. [Test-time adaptation by fine-tuning on FGW neighbours (pilot)](#12-test-time-adaptation-by-fine-tuning-on-fgw-neighbours-pilot)
 
 ---
 
@@ -508,6 +509,57 @@ Outputs: `data/mof_search/global_vs_fgw/` (`pairs.csv` with every pair and its v
 
 ---
 
+## 12. Test-time adaptation by fine-tuning on FGW neighbours (pilot)
+
+**Question.** Does fine-tuning MACE-OMAT-0 on the 20 OMat24 structures closest to a target MOF
+(by structure FGW) improve its accuracy on that MOF?
+
+**Method** (`tta.build_sets`, `tta.prepare`, `tta.evaluate`, `tta.compare`; `slurm/tta_finetune.slurm`).
+Targets are the four search queries with meaningful FGW neighbours (Q6 Mn formate, Q3 Co, Q4 Cd,
+Q1 Cu). Training: OMat24 sr_10m frames ranked 1–20 by FGW, with their OMat24 PBE(+U) labels;
+validation: ranks 21–25 (the target is never used for training or model selection). Controls: 20
+random OMat24 frames, and the 20 nearest by the Z-weighted global vector. Fine-tuning follows
+Aryan's MACE fine-tuning method (group-internal, `/scratch/gpfs/ROSENGROUP/shared/aryan/finetune_method`):
+energy/force/stress loss 1/10/10, lr 1e-4, EMA 0.99, AMSGrad, float32, 60 epochs, batch 4, E0s of the
+foundation model, seed 123, one GPU (about 3 minutes per run). The target set is every MOF-off PBE
+frame of the framework (4 frames for Q6, 39–40 for the others, 300–1000 K), scored before fine-tuning
+and after epochs 1, 2, 3, 6, 11, 21, 41 and 60. Before training, the trainer's validation errors equal
+those of the foundation model.
+
+MOF-off's PBE set comes from a D3BJ dataset without +U; OMat24 is PBE(+U) without dispersion. The
+target energy error therefore carries a constant per-atom offset (170–240 meV/atom) that OMat24
+data cannot remove; forces and offset-free energies are the meaningful measures.
+
+**Target force MAE (eV/Å), before and after 60 epochs:**
+
+| Target | Before | FGW neighbours | Global-vector neighbours | Random structures |
+|---|---|---|---|---|
+| Q6 Mn | 0.223 | 0.247 (+11%) | 0.222 (−1%) | 0.250 (+12%) |
+| Q3 Co | 0.220 | 0.215 (−2%) | 0.218 (−1%) | 0.244 (+11%) |
+| Q4 Cd | 0.156 | 0.139 (−11%) | 0.141 (−10%) | 0.169 (+8%) |
+| Q1 Cu | 0.245 | 0.235 (−4%) | 0.256 (+5%) | 0.282 (+15%) |
+
+**Results.**
+
+* Fine-tuning on random OMat24 structures always degrades the target (+8 to +15% force error):
+  the model specialises to unrelated chemistry.
+* Fine-tuning on neighbours avoids that degradation and gives modest gains for three of four
+  targets, largest for the Cd MOF (−11%) even though Cd is absent from its training structures. FGW
+  and global-vector neighbours perform similarly; FGW is better for the Cu MOF, the global vector for
+  the Mn formate (−9% after 6 epochs, back to −1% by 60).
+* Offset-free energy errors fall for Q3 with FGW (8.5 → 6.4 meV/atom) and Q1 (32.1 → 29.2), and change
+  little otherwise. FGW and global neighbours also reduce the raw energy offset for Q3 and Q4
+  (for example 172 → 72 meV/atom for Q4); random structures do not.
+* Choosing the epoch by validation error (target-blind) keeps most of the gain for Q3 and Q4, where
+  the best validation epoch is the last; for Q6 and Q1 it stops after 1–4 epochs, with little change.
+* Caveats: one seed and one set of hyperparameters; the FGW top-20 consists of AIMD frames of only
+  5–8 materials; the targets' metals are absent from the training structures for Q3 and Q4; the
+  labels of training and target differ in dispersion and +U treatment.
+
+Outputs: `data/tta/summary.csv`, `data/tta/target_force_mae.png`; runs in `$SCRATCH/tta/`.
+
+---
+
 ## 11. Where each result comes from
 
 | Result | Module(s) | Output |
@@ -522,5 +574,6 @@ Outputs: `data/mof_search/global_vs_fgw/` (`pairs.csv` with every pair and its v
 | MOF-off vs OMat24 (§8) | `embeddings.embedding_overlap`, `structure_distance.*` | `data/overlap/`, `data/structure_fgw/` |
 | 10M search (§9) | `mof_search.*`, `structure_distance.build_grouped_samples` | `data/mof_search/`, `data/grouped_fgw/` |
 | Global vectors vs FGW (§9) | `mof_search.global_vs_fgw` | `$SCRATCH/global_pool/`, `data/mof_search/global_vs_fgw/` |
+| Test-time adaptation (§12) | `tta.*` | `$SCRATCH/tta/`, `data/tta/` |
 
 Job scripts for each stage are listed in the [README](../README.md#pipeline).
