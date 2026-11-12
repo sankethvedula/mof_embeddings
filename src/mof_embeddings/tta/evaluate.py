@@ -16,10 +16,22 @@ import pandas as pd
 
 
 def model_from_checkpoint(model, checkpoint, out):
-    """Write a .model with the architecture of `model` and the weights of a training checkpoint."""
+    """Write a .model with the architecture of `model` and the weights of a training checkpoint.
+    LoRA checkpoints (separate low-rank matrices) are loaded into LoRA layers injected with the run's rank
+    and alpha (from the run config next to the checkpoints) and merged, as mace_run_train does at the end."""
+    from pathlib import Path
     import torch
     m = torch.load(model, map_location="cpu", weights_only=False)
-    m.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=False)["model"])
+    state = torch.load(checkpoint, map_location="cpu", weights_only=False)["model"]
+    if any("lora" in k for k in state):
+        import yaml
+        from mace.modules.lora import inject_LoRAs, merge_lora_weights
+        cfg = yaml.safe_load(next(Path(checkpoint).parent.parent.glob("*.yaml")).read_text())
+        m = inject_LoRAs(m, rank=int(cfg.get("lora_rank", 4)), alpha=float(cfg.get("lora_alpha", 1.0)))
+        m.load_state_dict(state)
+        merge_lora_weights(m)
+    else:
+        m.load_state_dict(state)
     torch.save(m, out)
     return out
 

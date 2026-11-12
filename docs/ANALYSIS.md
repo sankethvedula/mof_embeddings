@@ -18,7 +18,7 @@ same results with one finding per slide. Module names below are relative to `mof
 9. [Search of 10M OMat24 structures for MOF analogues](#9-search-of-10m-omat24-structures-for-mof-analogues)
 10. [Conclusions, limitations and next steps](#10-conclusions-limitations-and-next-steps)
 11. [Where each result comes from](#11-where-each-result-comes-from)
-12. [Test-time adaptation by fine-tuning on FGW neighbours (pilot)](#12-test-time-adaptation-by-fine-tuning-on-fgw-neighbours-pilot)
+12. [Test-time adaptation by fine-tuning on FGW neighbours](#12-test-time-adaptation-by-fine-tuning-on-fgw-neighbours)
 
 ---
 
@@ -509,7 +509,7 @@ Outputs: `data/mof_search/global_vs_fgw/` (`pairs.csv` with every pair and its v
 
 ---
 
-## 12. Test-time adaptation by fine-tuning on FGW neighbours (pilot)
+## 12. Test-time adaptation by fine-tuning on FGW neighbours
 
 **Question.** Does fine-tuning MACE-OMAT-0 on the 20 OMat24 structures closest to a target MOF
 (by structure FGW) improve its accuracy on that MOF?
@@ -555,8 +555,152 @@ data cannot remove; forces and offset-free energies are the meaningful measures.
 * Caveats: one seed and one set of hyperparameters; the FGW top-20 consists of AIMD frames of only
   5–8 materials; the targets' metals are absent from the training structures for Q3 and Q4; the
   labels of training and target differ in dispersion and +U treatment.
+* Not pursued: adding a D3(BJ) correction to put target energies at the reference's level of theory.
+  Raw energy errors therefore mix a genuine model correction (the foundation model is already
+  67–68 meV/atom off on the OMat24 neighbours of Q3 and Q4, and fine-tuning removes most of that) with
+  the dispersion offset; only forces and offset-free energies are interpreted.
 
-Outputs: `data/tta/summary.csv`, `data/tta/target_force_mae.png`; runs in `$SCRATCH/tta/`.
+**Round 2: all ten queries, 100 training structures, lower learning rates.** The same protocol on all
+ten search queries (adding Q2 Zn, Q5 Fe, Q7 Ag, Q8 Ni, Q9 Ce, Q10 La; 4–90 PBE frames each), with
+training sets of 100 structures (ranks 1–100, validation 101–105; the 20-structure sets are their first
+20) and learning rates 3e-5 and 1e-5 (20 structures). The optimiser is Adam (AMSGrad); the plateau
+scheduler (patience 50) never lowers the rate within 60 epochs, so each run uses a constant rate.
+120 runs in total; `slurm/tta_batch.slurm` chains runs within one GPU job.
+
+Target force MAE, change after 60 epochs relative to MACE-OMAT-0, over the ten targets:
+
+| Training set | lr | Mean | Median | Targets improved | Range |
+|---|---|---|---|---|---|
+| 20 nearest by FGW | 1e-4 | +1.2% | +0.1% | 5/10 | −10.6 to +11.6% |
+| | 3e-5 | −0.1% | −0.3% | 5/10 | −9.7 to +7.2% |
+| | 1e-5 | −0.6% | −0.7% | 6/10 | −8.0 to +6.4% |
+| 100 nearest by FGW | 1e-4 | +1.7% | +1.5% | 4/10 | −13.7 to +12.6% |
+| 20 nearest by global vector | 1e-4 | +4.2% | +0.7% | 5/10 | −10.0 to +27.7% |
+| | 3e-5 | +0.8% | −1.7% | 6/10 | −10.2 to +18.0% |
+| | 1e-5 | −1.9% | −2.5% | 6/10 | −9.2 to +8.0% |
+| 100 nearest by global vector | 1e-4 | +5.6% | +2.8% | 4/10 | −8.5 to +29.4% |
+| 20 random | 1e-4 | +9.6% | +10.7% | 0/10 | +2.8 to +15.1% |
+| | 3e-5 | +3.7% | +3.2% | 2/10 | −3.4 to +11.5% |
+| | 1e-5 | +2.2% | +1.2% | 5/10 | −3.5 to +9.9% |
+| 100 random | 1e-4 | +13.3% | +8.8% | 0/10 | +0.3 to +51.4% |
+
+* Averaged over ten targets, fine-tuning on neighbours does not improve the target: mean changes lie
+  within ±2% at every learning rate, with about half the targets better and half worse. Random
+  structures are consistently worse than neighbours at the same learning rate.
+* The four queries chosen for meaningful neighbours benefit most (Q4 Cd −8 to −14% with FGW, Q3 and
+  Q1 −2 to −5%); the six added queries mostly do not (Q7, Q8, Q9 worse with most sets).
+* 100 structures do not help on average: they improve Q6 (−5%) and Q4 (−14%) but degrade Q7, Q8 and
+  Q10. Ranks 21–100 are further from the target, and 100 structures mean five times more updates.
+* Lower learning rates shrink every change towards zero and remove the large late degradations
+  (global vector Q2 +28% → +8%, FGW Q5 +12% → +3%), at the cost of smaller gains (FGW Q4 −11% → −8%).
+  Global-vector neighbours at 1e-5 have the best average (−1.9%, worst case +8%).
+* Stopping at the best scored epoch, which requires the target, would improve 8–9 of 10 targets with
+  neighbour sets (mean −2 to −4%). The validation error on the held-out neighbours does not find
+  that epoch reliably, so this is an upper bound, not an achievable result.
+* Offset-free energy errors change by less than 1–2 meV/atom in most cases, with no consistent
+  direction across learning rates.
+
+**Which FGW term predicts the gain** (`tta.neighbour_terms`). Each training structure is rescored against the
+query frame and FGW is split at the optimal plan into the feature term ⟨M,T⟩ (UMA feature cost of
+matched atoms) and the geometry term (GW loss on the periodic kernels); the recomputed FGW equals the
+search value to 1e-16. Averaged over each training set and compared with the change in target force
+MAE (Spearman ρ; positive = a larger term goes with a larger error increase):
+
+| Sets | lr | FGW | feature term | geometry term | same-element share |
+|---|---|---|---|---|---|
+| 30 sets of 20 (all methods) | 1e-4 | +0.45 | **+0.60** | +0.33 | −0.50 |
+| 20 neighbour sets of 20 (FGW, global) | 1e-4 | +0.33 | **+0.58** | +0.23 | −0.34 |
+| 20 neighbour sets of 20 | 1e-5 | +0.05 | **+0.38** | −0.03 | −0.32 |
+| 30 sets of 100 | 1e-4 | +0.55 | +0.42 | **+0.56** | −0.36 |
+
+* For 20-structure sets the feature term is the best predictor: sets whose atoms carry UMA features
+  close to the target's improve it (all sets with mean feature term below 0.9 improve or stay within
+  +5%). The geometry term adds little at 20 structures and nothing at low learning rate.
+* With 100 structures the geometry term becomes predictive as well: the extra ranks bring in
+  geometrically different structures (Q7, Q8, Q10), and those runs degrade.
+* The global vector often finds sets with a lower feature term but a higher geometry term than FGW
+  (Q6, Q9, Q7, Q8); where its feature advantage is large (Q9: 0.77 vs 1.32) it fine-tunes better.
+  FGW at α = 0.5 weighs geometry equally, which can favour geometrically similar but chemically
+  less similar structures.
+* Within a target, the set (FGW or global) with the lower term wins only 5–7 of 10 times, so the
+  correlation mainly separates easy targets from hard ones rather than choosing between two sets.
+  Ten targets and one seed; the correlations are indicative.
+
+**Round 3: 30 targets, feature-weighted FGW, seeds, training variants.**
+
+*Setup.* Twenty further targets (`tta.targets`: MOF-off sample structures that are not search
+queries, ≥ 20 PBE frames, ≤ 200 atoms, at most two per metal; 18 metals, 26–186 atoms, 37–90 frames)
+join the ten search queries. Training sets are re-ranked by FGW at α = 0.25 and α = 0.1 (more weight on
+features) within a candidate pool (`tta.select_alpha`: top 1000 by FGW at α = 0.5 plus top 500 by the
+global vector for the queries; top 1000 by the global vector for the new targets, whose α = 0.5 sets are
+therefore pool-restricted). Each target is fine-tuned on five 20-structure sets (FGW α 0.5 / 0.25 / 0.1,
+global vector, random) at lr 3e-5, 60 epochs. All runs go through one GPU job at a time
+(`slurm/tta_batch.slurm`: up to 8 runs share the GPU when ≥ 12 GB is free; chained jobs skip finished
+runs). The loss is MACE's energy/force/stress MSE (per-atom energy, weights 1/10/10); with OMat24's
+typical errors the force term is ~99% of it and the stress term (eV/Å³) is negligible.
+
+*Change versus MACE-OMAT-0 after 60 epochs, 30 targets, lr 3e-5* (`tta.effect`; mean, 95% bootstrap
+interval over targets, targets improved):
+
+| Metric | FGW α 0.5 | FGW α 0.25 | FGW α 0.1 | Global vector | Random |
+|---|---|---|---|---|---|
+| Force MAE | +1.4% [−1, +5], 13/30 | +0.6% [−2, +4], 16/30 | +0.3% [−2, +3], 14/30 | +1.7% [−2, +5], 16/30 | +5.3% [+3, +8], 6/30 |
+| Force MAE, query frame | +1.6%, 10/30 | +0.9%, 12/30 | +0.4%, 14/30 | +2.3%, 13/30 | +6.8%, 7/30 |
+| Energy MAE, raw | −19%, 27/30 | −24%, 26/30 | −26%, 27/30 | −24%, 27/30 | +1.5%, 14/30 |
+| Energy MAE, offset-free | −2.7%, 19/30 | −4.1%, 19/30 | −1.9%, 17/30 | −2.7%, 19/30 | +6.8%, 9/30 |
+| Stress MAE | −10%, 21/30 | −16%, 22/30 | −13%, 22/30 | −11%, 22/30 | +39%, 8/30 |
+
+* Neighbours do not reduce the force or frame-to-frame energy error relative to the foundation model;
+  they reduce stress (−10 to −16%) and the raw energy (offset-dominated).
+* Neighbours are clearly better than random structures (FGW α 0.1 vs random: force −5.0 points,
+  23/30, p = 0.002; raw energy −28, p < 0.001; stress −52, p < 0.001) but not better than the global
+  vector on any metric (α 0.5 is worse on raw energy, p = 0.02). α 0.1 beats α 0.5 on raw energy
+  (−7 points, p = 0.003), not on forces.
+* +U labels: OMat24 uses PBE+U for oxides/fluorides of Co, Cr, Fe, Mn, Mo, Ni, V, W; MOF-off has no +U.
+  On the 10 targets with such a metal every set degrades forces (+2.4 to +5.8%); on the other 20,
+  neighbour sets are neutral (−0.8 to −0.1%) and random sets cost 6.5%. Within the +U group the share
+  of +U-labelled training structures does not track the change.
+* Seeds: repeating 29 runs with seed 7 changes the target errors by 0.1–0.3 points (correlation 1.00);
+  per-target differences are properties of the target and training set, not training noise. The
+  remaining seed repeats were dropped.
+
+*Along training and stopping rules* (`tta.epochs`). The training-set force error falls 40–48% over
+60 epochs and the held-out neighbours' 5–22%, but the target's force error is lowest after 1–6 epochs
+and drifts up afterwards. Stopping at the lowest held-out-neighbour error does not find the target's
+best epoch (it picks epoch ~60 for neighbour sets). Best fixed schedules on the 10 search targets:
+FGW α 0.1 at lr 3e-5 for 1–6 epochs (−1.7 to −1.8%, 9/10), or at lr 1e-5 for 40–60 epochs (−2.0%, 8/10;
+stress −21%). Stopping at the target's own best epoch (an upper bound) gains −2 to −4%.
+
+*Training variants* (10 search targets, 30 epochs; `tta.epochs --sweep`, FGW α 0.25 set):
+
+| Protocol | Epochs | Force MAE | Energy, offset-free | Stress |
+|---|---|---|---|---|
+| all weights, lr 3e-5 | 6 / 60 | −1.2% / −0.9% | −0.7% / −1.1% | −21% / −14% |
+| readouts only, lr 1e-3 | 6 / 30 | −1.0% / −0.2% | −1.7% / +0.3% | +11% / +7% |
+| products + readouts, lr 1e-4 | 6 / 30 | −0.9% / −1.3% | −2.2% / −4.8% | +1% / −4% |
+| LoRA rank 4, lr 1e-3 | 6 / 30 | −0.6% / 0.0% | −1.4% / +2.7% | −16% / −20% |
+| stress weight 1000, lr 3e-5 | 6 / 30 | −1.3% / −1.7% | −2.9% / −3.2% | +0.3% / +10% |
+
+No variant changes the force error by more than ~1 point relative to training all weights (all paired
+p > 0.16), and none protects against random structures (+4 to +6% after 30 epochs). Freezing layers
+loses the stress improvement, and weighting stress 100× makes the target's stress worse (22–29 points
+worse than default, p ≈ 0.02): OMat24 stresses lack the D3 dispersion pressure present in the MOF-off
+reference.
+
+*Conclusion.* With 20 OMat24 structures selected by FGW and labelled at OMat24's level of theory,
+fine-tuning MACE-OMAT-0 changes the target MOF's force and frame-to-frame energy errors by at most
+~2%, whatever the selection weight, training length or adaptation method; the gains are bounded by
+the level-of-theory mismatch and the distance between OMat24 neighbours and MOFs, not by the
+optimisation. FGW (or global-vector) selection matters in that it avoids the degradation caused by
+random data. Best protocol found: FGW α 0.1–0.25, all weights, lr 3e-5 for ~6 epochs (or lr 1e-5),
+giving about −1.5 to −2% on forces and −20% on stress.
+
+Outputs: `data/tta/summary.csv` (every scored epoch), `data/tta/final.csv` (before vs after),
+`target_force_mae.png` (20 vs 100 structures), `target_force_mae_lr.png` (learning rates),
+`convergence*.png` (training loss, validation and target errors per epoch), `final_force_change.png`,
+`neighbour_terms/` (FGW terms per training structure, `terms_vs_gain.png`), `alpha_rank/` (pool
+rankings), `effect/` (all metrics vs controls, +U split), `epochs/` (stopping rules, `sweep*`,
+`protocol_metrics.csv`); runs in `$SCRATCH/tta/`.
 
 ---
 
