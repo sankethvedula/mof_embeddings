@@ -194,7 +194,7 @@ w(λ) = (1 − λ) w_foundation + λ w_fine-tuned, evaluated on the target with 
 * On the 57 targets without a +U metal it gives −2.3% on forces (45/57). The +U targets stay at about
   0% for any λ.
 
-### 5.8 Round 5: MOF-off neighbours and +U-free OMat24 neighbours (interim, 12 Nov)
+### 5.8 Round 5: MOF-off neighbours and +U-free OMat24 neighbours
 
 Two new training sources at FGW α 0.25, lr 3e-5:
 * **fgwmidnou:** the OMat24 pool without +U-labelled structures. This changes the set only for the 21
@@ -204,31 +204,30 @@ Two new training sources at FGW α 0.25, lr 3e-5:
   excluded, one frame per framework. These labels are at the target's level of theory (PBE-D3(BJ),
   no U).
 
-**Interim results.** moffgw: 62 of 79 targets at 6 epochs, 61 at 60 epochs. fgwmidnou: all its
-targets except S83, which is being rerun.
+All 79 targets, lr 3e-5:
 
 | Training set | Epochs | Force | Offset-free energy | Stress | Raw energy |
 |---|---|---|---|---|---|
 | OMat24 FGW α 0.25 (round 4, 79 targets) | 6 / 60 | −0.9% / −0.5% | −4.3% / −1.6% | −13% / −14% | −21% / −27% |
-| OMat24 without +U labels (78) | 6 / 60 | −0.9% / −0.3% | −1.6% / +3.7% | −10% / −7% | −20% / −26% |
-| **MOF-off, other frameworks** | 6 | **−8.7%** [−10.8, −6.5], 56/62 | −8.6% | −23% | −50% |
-| **MOF-off, other frameworks** | 60 | **−21.4%** [−24.7, −18.3], 60/61 | **+19%** | −16% | −82% |
+| OMat24 without +U labels | 6 / 60 | −0.9% / −0.2% | −1.6% / +3.6% | −9.5% / −4.9% | −20% / −25% |
+| **MOF-off, other frameworks** | 6 | **−8.9%** [−10.7, −7.1], 73/79 | −7.3% | −24% | −52% |
+| **MOF-off, other frameworks** | 60 | **−21.2%** [−24.2, −18.3], 78/79 | **+23%** | −16% | −84% |
 
 * **MOF-off neighbours reduce force errors ten to twenty times more than OMat24 neighbours.** Paired
-  against OMat24 FGW on the same targets the difference is −7.9 points at 6 epochs (55/62,
-  p = 5 × 10⁻¹⁰) and −20.9 points at 60 epochs (58/61, p = 2 × 10⁻¹¹). The gain holds for +U metals
-  (−24%) and other metals (−21%), and for queries, round-3 and round-4 targets alike.
-* **Long training harms energies.** After 60 epochs the offset-free energy error rises by 19%
-  (+57% on +U targets) while forces keep improving. At 6 epochs energy and forces improve together.
+  against OMat24 FGW on the same targets the difference is −8.0 points at 6 epochs (71/79,
+  p = 1 × 10⁻¹²) and −20.7 points at 60 epochs (73/79, p = 5 × 10⁻¹⁴). The gain holds for +U metals
+  (−24% at 60 epochs, 22/22) and other metals (−20%), and for queries, round-3 and round-4 targets alike.
+* **Long training harms energies.** After 60 epochs the offset-free energy error rises by 23%
+  (+52% on +U targets; paired against OMat24 FGW +24 points, p = 0.008) while forces keep improving. At 6 epochs energy and forces improve together.
   Weight interpolation is the obvious next fix.
 * **Removing +U labels from OMat24 does not help the +U targets** (+3.6% on forces at 60 epochs
   against +2.2% with +U). The OMat24 problem is distance in chemistry, not only the +U labels.
-* **Caveat 1, near-duplicates.** Only the target's own framework ID is excluded. 22 of 62 targets
+* **Caveat 1, near-duplicates.** Only the target's own framework ID is excluded. 25 of 79 targets
   have a neighbour with the same empirical formula (another CSD entry or polymorph). These gain more
-  (−31.5% at 60 epochs) than the others (−15.7%), and the others still gain far more than with
+  (−32.8% at 60 epochs, −15.6% at 6) than the others (−15.9%, −5.8%), and the others still gain far more than with
   OMat24.
 * **Caveat 2, FGW versus level of theory.** The gain tracks FGW distance across targets (Spearman
-  +0.4 to +0.5 with the best neighbour's FGW and with the set's feature term). But part of it may come
+  +0.4 to +0.5 with the best neighbour's FGW and with the set's feature term, on the first 62 targets). But part of it may come
   only from matching the target's level of theory.
 
 **Controls queued** (183 runs, Slurm chain 17429425–17429430):
@@ -252,12 +251,13 @@ Together these separate "FGW selection" from "same level of theory" and from nea
    interpolation (λ 0.5) and a target-blind abstain rule make the gain reliable, and +U-metal targets
    are not helped.
 5. Fine-tuning on 20 MOF-off frames of *other* frameworks, selected by FGW, cuts the target's force
-   error by about 9% after 6 epochs and about 21% after 60 epochs. Whether FGW selection is
+   error by about 9% after 6 epochs and about 21% after 60 epochs (79 targets), but long training raises
+   the offset-free energy error by about 23%. Whether FGW selection is
    responsible, rather than the shared level of theory, is what the queued controls will show.
 
 ## 7. Open items
 
-* Finish round 5 (S83 no-+U run) and the MOF-off controls. Then compare moffgw with mofrandom and
+* Finish the MOF-off controls (running). Then compare moffgw with mofrandom and
   mofglobal, and moffgwnf with moffgw.
 * Weight interpolation of the MOF-off runs, to recover the offset-free energy lost at 60 epochs.
 * Replay or L2-to-foundation regularisation on the winning data source (the MACE fork supports replay
