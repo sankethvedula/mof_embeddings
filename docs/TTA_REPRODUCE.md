@@ -29,6 +29,9 @@ source slurm/env.sh        # sets PY, PY_MACE (your conda envs), PYTHONPATH; run
 * **Environments.** `PY` = `pretrain_analysis_env` (selection, analysis). `PY_MACE` =
   `pretrain_analysis_env_mace` (LMDB writing, evaluation, `mace_run_train` from your
   `pretrain_analysis/mace-src` fork). Both default to your env paths in `slurm/env.sh`.
+* **POT (optimal transport, used for every FGW score).** Neither env has it. Install it into the repo
+  folder: `$PY -m pip install --target .pydeps pot==0.9.7` (`config.use_local_packages()` adds
+  `.pydeps` to the path).
 * **Foundation model.** Copy `mace-omat-0-medium.model` from your `finetune_method` folder to
   `finetune/mace-omat-0-medium.model`. It is gitignored, as is `finetune/aryan_method/`.
 * **Output root.** Set `export MOF_EMB_SCRATCH=/scratch/gpfs/ROSENGROUP/<you>`. Runs go to
