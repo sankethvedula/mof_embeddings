@@ -687,19 +687,89 @@ loses the stress improvement, and weighting stress 100× makes the target's stre
 worse than default, p ≈ 0.02): OMat24 stresses lack the D3 dispersion pressure present in the MOF-off
 reference.
 
+*Which FGW term predicts the gain, 30 targets* (`tta.neighbour_terms`). All 150 round-3 training sets
+are rescored with FGW at the search's α = 0.5 and split into feature and geometry terms, as above.
+The terms are related to the change after 60 epochs at lr 3e-5 in two ways. *Across sets* compares
+every (target, set) pair and mixes target difficulty with set quality. *Within target* subtracts each
+target's mean over its sets, so only the choice of training set for one target is compared.
+
+| Spearman ρ with % change, neighbour sets (120; 30 targets) | FGW | feature term | geometry term | same-element share | +U share |
+|---|---|---|---|---|---|
+| force MAE, across sets | +0.19 | **+0.52** | 0.00 | −0.35 | +0.41 |
+| force MAE, within target | −0.09 | +0.14 | −0.10 | −0.08 | −0.10 |
+| energy offset-free, across sets | +0.03 | +0.06 | +0.02 | −0.18 | −0.13 |
+| stress MAE, across sets | +0.09 | +0.19 | +0.03 | −0.17 | +0.05 |
+| stress MAE, within target | −0.11 | +0.22 | −0.11 | −0.09 | +0.11 |
+
+(|ρ| ≥ 0.19 is p < 0.05 at n = 120.)
+
+* **The feature term identifies targets that neighbours help.** At the target level (mean over a
+  target's four neighbour sets) the feature term and the force change have ρ = +0.62. On targets
+  without a +U metal the feature term averages 0.77 and forces change by −0.5%. On targets with a +U
+  metal it averages 1.20 and forces change by +3.9%. Excluding the +U targets, ρ is still +0.36
+  (p = 0.001). OMat24 has no close, plain-PBE chemistry for these metals.
+* **No term picks the best set for a given target.** Within a target, no term predicts force or
+  offset-free energy (|ρ| ≤ 0.14). The set with the lowest feature term gives the lowest force error
+  for 9 of 30 targets, where chance is 7.5. The one weak within-target signal is stress: sets with
+  lower feature terms improve stress a little more (ρ = +0.22, p = 0.02).
+* The geometry term predicts nothing at 20 structures. The +U share of a set correlates with its
+  feature term (ρ = +0.50), so the two cannot be separated across targets.
+* Offset-free energy is not predicted by any term, in either comparison.
+
+**Round 4: FGW α 0.25 on 79 targets.** The round-3 protocol for FGW α 0.25 (20 structures, all
+weights, lr 3e-5, 60 epochs, scored at epochs 6 and 60) is applied to 49 further targets
+(`tta.targets --extend`). These are every remaining MOF-off sample structure with ≥ 20 PBE frames,
+≤ 200 atoms and its own framework, without the per-metal cap: 18 Cu, 11 Zn, 5 Co, 3 each of Fe, Mn,
+Ag and Cd, one each of In, Ni and Yb, 26–186 atoms. Pools and sets are built as for the round-3
+S targets. Only the α 0.25 set is fine-tuned, so the comparison is with MACE-OMAT-0 and not with
+random or global sets (`tta.effect --cohorts fgwmid`).
+
+*Change versus MACE-OMAT-0, FGW α 0.25* (mean, 95% bootstrap interval, targets improved):
+
+| Targets | Force MAE, 6 ep. | Force MAE, 60 ep. | Energy offset-free, 6 / 60 ep. | Stress, 6 / 60 ep. | Energy raw, 60 ep. |
+|---|---|---|---|---|---|
+| all 79 | **−0.9%** [−1.8, −0.0], 48/79 | −0.5% [−2.1, +1.1], 43/79 | **−4.3%** [−7.1, −1.5] / −1.6% | −13% / −14% | −27% |
+| 49 new (round 4) | −1.5% [−2.6, −0.4], 30/49 | −1.3% [−3.2, +0.6], 27/49 | −4.3% / 0.0% | −14% / −14% | −28% |
+| 30 earlier | −0.0%, 18/30 | +0.6%, 16/30 | −4.3% / −4.1% | −10% / −16% | −24% |
+| 57 without a +U metal | −1.3% [−2.4, −0.3], 38/57 | −1.6% [−3.6, +0.5], 36/57 | −4.0% / −1.5% | −14% / −14% | −31% |
+| 22 with a +U metal | +0.2%, 10/22 | **+2.2%** [+0.1, +4.3], 7/22 | −5.1% / −1.7% | −10% / −15% | −14% |
+
+* With 79 targets the small gains become statistically detectable. After 6 epochs the force error
+  falls by 0.9% (Wilcoxon p = 0.003) and the offset-free energy error by 4.3% (p = 0.003). After 60
+  epochs neither is significant (p = 0.39 and 0.09), because longer training drifts away from the
+  target, as in round 3. Stress improves at both points (p < 10⁻⁵).
+* The new targets, mostly Cu and Zn, behave like the non-+U targets of round 3: forces fall by
+  1–2% (Cu −2.0%, Zn −1.5% after 6 epochs). Targets with a +U metal do not improve on forces and get
+  worse with longer training (+2.2% after 60 epochs; Co +2.8%, Ni +3.6%, Mn +1.4%).
+* The size of the effect is unchanged: about −1 to −2% on forces, −4% on offset-free energy and
+  −13% on stress, best after a short fine-tune.
+
+Round-4 outputs: `effect/cohorts_fgwmid.csv` (per target), `cohorts_fgwmid_summary.csv`,
+`cohorts_fgwmid.png`.
+
+**Later work** (adapt-or-not rule `tta.abstain`, weight interpolation `tta.interpolate`, round 5 with
+MOF-off neighbours `tta.select_mof` and +U-free OMat24 neighbours, MOF-off controls) is summarised in
+[REPORT.md §5.6–5.8](REPORT.md#56-adapt-or-not-a-target-blind-rule-ttaabstain); how to rerun everything is in
+[TTA_REPRODUCE.md](TTA_REPRODUCE.md).
+
 *Conclusion.* With 20 OMat24 structures selected by FGW and labelled at OMat24's level of theory,
 fine-tuning MACE-OMAT-0 changes the target MOF's force and frame-to-frame energy errors by at most
 ~2%, whatever the selection weight, training length or adaptation method; the gains are bounded by
 the level-of-theory mismatch and the distance between OMat24 neighbours and MOFs, not by the
 optimisation. FGW (or global-vector) selection matters in that it avoids the degradation caused by
 random data. Best protocol found: FGW α 0.1–0.25, all weights, lr 3e-5 for ~6 epochs (or lr 1e-5),
-giving about −1.5 to −2% on forces and −20% on stress.
+giving about −1.5 to −2% on forces and −20% on stress. On 79 targets (FGW α 0.25, 6 epochs) the
+gains are small but significant: forces −0.9%, offset-free energy −4.3%, stress −13%. They come
+from targets without a +U metal (forces −1.3%). The FGW feature term predicts which targets
+benefit, but no FGW term picks the best training set for a given target.
 
 Outputs: `data/tta/summary.csv` (every scored epoch), `data/tta/final.csv` (before vs after),
 `target_force_mae.png` (20 vs 100 structures), `target_force_mae_lr.png` (learning rates),
 `convergence*.png` (training loss, validation and target errors per epoch), `final_force_change.png`,
-`neighbour_terms/` (FGW terms per training structure, `terms_vs_gain.png`), `alpha_rank/` (pool
-rankings), `effect/` (all metrics vs controls, +U split), `epochs/` (stopping rules, `sweep*`,
+`neighbour_terms/` (FGW terms per training structure, `correlations.csv` across sets and within
+target, `terms_vs_gain.png` at lr 3e-5, `terms_vs_gain_force.png` at other learning rates and sizes),
+`alpha_rank/` (pool rankings), `effect/` (all metrics vs controls, +U split, `cohorts_fgwmid*` for
+round 4), `epochs/` (stopping rules, `sweep*`,
 `protocol_metrics.csv`); runs in `$SCRATCH/tta/`.
 
 ---

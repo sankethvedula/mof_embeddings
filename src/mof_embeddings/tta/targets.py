@@ -5,10 +5,12 @@ Candidates are the MOF-off structures of data/structure_fgw/sample (which carry 
 that are not queries of the 10M search. A candidate qualifies when its framework has at least
 --min-frames MOF-off PBE frames (the target set), at most --max-atoms atoms (fine-tuning cost) and no
 two atoms closer than 0.8 A. At most --per-metal targets share a metal (first metal in the formula);
-within these limits targets are drawn at random (seed 0) up to --n.
+within these limits targets are drawn at random (seed 0) up to --n. With --extend the existing table is
+kept and further qualifying targets (other frameworks) are appended up to --n in total.
 
-  $PY -m mof_embeddings.tta.targets [--n 20] [--min-frames 20] [--max-atoms 200] [--per-metal 2]
-  -> data/tta/targets_extra.csv (query = S<idx>, idx, formula, natoms, metal, min_dist, pbe_frames)
+  $PY -m mof_embeddings.tta.targets [--n 20] [--min-frames 20] [--max-atoms 200] [--per-metal 2] [--extend]
+  -> data/tta/targets_extra.csv (query = S<idx>, idx, formula, natoms, metal, min_dist, pbe_frames,
+     round: 3 for the first 20 targets, one more for each --extend)
 """
 import argparse
 
@@ -49,6 +51,7 @@ def main():
     parser.add_argument("--min-frames", type=int, default=20)
     parser.add_argument("--max-atoms", type=int, default=200)
     parser.add_argument("--per-metal", type=int, default=2)
+    parser.add_argument("--extend", action="store_true", help="keep the existing targets and append new ones")
     args = parser.parse_args()
     c = candidates()
     q = pd.read_csv(SEARCH / "queries.csv")
@@ -57,13 +60,22 @@ def main():
     taken = q.metal.value_counts().to_dict()          # metals already covered by the search queries count
     rng = np.random.default_rng(0)
     pick = []
+    if args.extend and EXTRA_TARGETS.exists():
+        pick = [r for _, r in pd.read_csv(EXTRA_TARGETS).iterrows()]
+        for r in pick:
+            taken[r.metal] = taken.get(r.metal, 0) + 1
     for i in rng.permutation(len(ok)):
         r = ok.iloc[i]
-        if taken.get(r.metal, 0) < args.per_metal and r.framework not in {p.framework for p in pick}:
-            pick.append(r); taken[r.metal] = taken.get(r.metal, 0) + 1
         if len(pick) == args.n:
             break
-    out = pd.DataFrame(pick).sort_values("idx")
+        if r.idx in {p.idx for p in pick}:
+            continue
+        if taken.get(r.metal, 0) < args.per_metal and r.framework not in {p.framework for p in pick}:
+            pick.append(r); taken[r.metal] = taken.get(r.metal, 0) + 1
+    out = pd.DataFrame(pick)
+    first = 3 if "round" not in out else out["round"].max()          # round 3 chose the first 20 targets
+    out["round"] = out["round"].fillna(first + 1) if "round" in out else first
+    out = out.astype({"round": int}).sort_values("idx")
     EXTRA_TARGETS.parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(EXTRA_TARGETS, index=False)
     print(f"{len(c)} MOF-off sample structures, {len(ok)} qualify, {len(out)} chosen -> {EXTRA_TARGETS}")

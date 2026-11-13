@@ -7,6 +7,8 @@ structure distance, and a search of 10M OMat24 structures for analogues of MOF-o
 
 The methods and results are described in [`docs/ANALYSIS.md`](docs/ANALYSIS.md) and summarised in
 [`slides/atom_matching_2026-10-26.pdf`](slides/atom_matching_2026-10-26.pdf).
+A short report of every experiment is in [`docs/REPORT.md`](docs/REPORT.md); how to rerun the
+test-time adaptation experiments is in [`docs/TTA_REPRODUCE.md`](docs/TTA_REPRODUCE.md).
 
 ## Layout
 
@@ -61,7 +63,7 @@ sbatch slurm/run_python.slurm -m mof_embeddings.structure_distance.analyze_pairw
 | Pairwise matrices | `structure_distance.build_fgw_sample`, `structure_distance.compute_pairwise_fgw`, `structure_distance.analyze_pairwise_fgw`, `structure_distance.build_grouped_samples`, `structure_distance.plot_grouped_matrices`, `structure_distance.plot_closest_pairs` | `pairwise_fgw.slurm`, `grouped_fgw.slurm` |
 | 10M analogue search | `mof_search.prefilter`, `mof_search.rerank`, `mof_search.compare_subset_terms`, `mof_search.best_per_subset`, `mof_search.aimd_best_match_facts`, `mof_search.mof_neighbours_per_subset`, `mof_search.plot_search_matches`, `mof_search.plot_best_per_subset` | `mof_search.slurm` |
 | Global vectors vs FGW neighbours | `mof_search.global_vs_fgw --stage pool / compare / plot` | `global_pool.slurm`, then `run_python.slurm` |
-| Test-time adaptation (fine-tune on FGW neighbours) | `tta.targets`, `tta.select_alpha`, `tta.build_sets` (`$PY_MACE`), `tta.prepare`, `tta.evaluate` (`$PY_MACE`), `tta.compare`, `tta.effect`, `tta.epochs`, `tta.neighbour_terms` | `tta_finetune.slurm`, `tta_batch.slurm` |
+| Test-time adaptation (fine-tune on FGW neighbours) | `tta.targets`, `tta.select_alpha`, `tta.select_mof`, `tta.build_sets` (`$PY_MACE`), `tta.prepare`, `tta.evaluate` (`$PY_MACE`), `tta.interpolate` (`$PY_MACE`), `tta.compare`, `tta.effect`, `tta.abstain`, `tta.epochs`, `tta.neighbour_terms` | `tta_finetune.slurm`, `tta_batch.slurm`, `tta_interp.slurm` |
 
 Every module documents its inputs, outputs and options in its docstring (`--help`).
 

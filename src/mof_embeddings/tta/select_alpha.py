@@ -15,10 +15,16 @@ tta.build_sets takes ranks 1-20 (train) and 21-25 (valid). Rankings are exact on
 
   $PY -m mof_embeddings.tta.select_alpha [--targets Q6 S12 ...] [--workers 32] [--chunk 500]
   -> data/tta/alpha_rank/<target>.csv
+
+--no-plus-u: for targets whose pool has fewer than 25 structures without PBE+U labels (e.g. Mn
+targets, whose nearest 1000 are all Mn oxides), a second pool of the 1000 nearest structures by the
+global vector among those OMat24 labels without +U (tta.common.plus_u, from the atomic numbers of the
+UMA bank), scored at alpha 0.25 only -> data/tta/alpha_rank/<target>_nou.csv (used for fgwmidnou).
 """
 import argparse
 import glob
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -44,6 +50,23 @@ def global_distances(targets, mu, sd, chunk=1_000_000):
         p = np.asarray(pooled[i:i + chunk], dtype=np.float64)
         d[i:i + chunk] = np.sqrt(np.maximum((p ** 2).sum(1)[:, None] - 2 * p @ qv.T + (qv ** 2).sum(1)[None], 0))
     return d
+
+
+def plus_u_frames():
+    """Boolean per sr_10m frame: OMat24 labels it with PBE+U (a U metal together with O or F)."""
+    from ase.data import atomic_numbers
+    from mof_embeddings.mof_search.common import SR10M
+    from mof_embeddings.tta.common import U_METALS
+    cache = Path(f"{SCRATCH}/global_pool/plus_u.npy")
+    if cache.exists():
+        return np.load(cache)
+    z = np.load(SR10M / "atom_atomic_numbers.npy")
+    off = np.load(SR10M / "frame_atom_offsets.npy")
+    u = np.isin(z, [atomic_numbers[e] for e in U_METALS]).astype(np.int32)
+    of = np.isin(z, [8, 9]).astype(np.int32)
+    flag = (np.add.reduceat(u, off[:-1]) > 0) & (np.add.reduceat(of, off[:-1]) > 0)
+    np.save(cache, flag)
+    return flag
 
 
 def search_pool(target, qnames, rerank, gdist, bad):
@@ -116,7 +139,11 @@ def main():
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--chunk", type=int, default=500, help="pool structures per task")
     parser.add_argument("--skip-done", action="store_true", help="skip targets that already have a ranking")
+    parser.add_argument("--no-plus-u", action="store_true",
+                        help="second pool without +U-labelled structures where the first has fewer than 25")
     args = parser.parse_args()
+    if args.no_plus_u:
+        return no_plus_u(args)
     if args.skip_done:
         args.targets = [t for t in args.targets if not (OUT / f"{t}.csv").exists()]
         if not args.targets:
@@ -155,6 +182,38 @@ def main():
             if sum(map(len, done[t])) == len(pools[t]):
                 pd.concat(done[t]).to_csv(OUT / f"{t}.csv", index=False)
                 print(f"{t}: {len(pools[t])} pool structures scored at alpha {alphas[t]}", flush=True)
+
+
+def no_plus_u(args):
+    from mof_embeddings.mof_search.common import uma_stats
+    from mof_embeddings.tta.build_sets import flagged
+    from mof_embeddings.tta.common import N_TRAIN, N_VALID, plus_u
+    need = []
+    for t in args.targets:
+        p = OUT / f"{t}.csv"
+        if p.exists() and (~pd.read_csv(p).formula.map(plus_u)).sum() < N_TRAIN + N_VALID \
+                and not (args.skip_done and (OUT / f"{t}_nou.csv").exists()):
+            need.append(t)
+    if not need:
+        return
+    bad = flagged()
+    pu = plus_u_frames()
+    excl = set(np.flatnonzero(pu).tolist()) | bad
+    mu, sd = uma_stats()
+    d = global_distances(need, mu, sd)
+    pools = {t: global_pool(d[:, j], excl) for j, t in enumerate(need)}
+    print("no-+U pools:", {t: len(c) for t, c in pools.items()}, f"({pu.sum()} of {len(pu)} frames are +U)", flush=True)
+    jobs = [(t, c.iloc[i:i + args.chunk], [0.25]) for t, c in pools.items() for i in range(0, len(c), args.chunk)]
+    done = {t: [] for t in pools}
+    from multiprocessing import Pool
+    with Pool(max(args.workers, 1)) as pl:
+        for t, df in pl.imap_unordered(score, jobs):
+            done[t].append(df)
+            if sum(map(len, done[t])) == len(pools[t]):
+                df = pd.concat(done[t])
+                assert not df.formula.map(plus_u).any()
+                df.to_csv(OUT / f"{t}_nou.csv", index=False)
+                print(f"{t}: {len(df)} structures without +U scored at alpha 0.25", flush=True)
 
 
 if __name__ == "__main__":

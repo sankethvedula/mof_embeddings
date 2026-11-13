@@ -80,6 +80,8 @@ def main():
                 sets = list(target_dir(t).glob("*/train.lmdb"))
                 if not f.exists() or any(x.stat().st_mtime > f.stat().st_mtime for x in sets):
                     print(r)
+            elif (run_dir(t, s) / "same_as.txt").exists():      # identical to another selection's set
+                continue
             elif not (out_dir(t, s, lr, seed, variant) / f"eval_epoch{epochs_of(variant, args.epochs) - 1}.csv").exists():
                 print(r)
         return

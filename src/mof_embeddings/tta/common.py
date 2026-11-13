@@ -31,10 +31,16 @@ SR10M_LMDB = f"{PRETRAIN}/data/processed/omat24/stratified_random_nested/sr_10m/
 SEARCH = DATA / "mof_search"
 SAMPLE = DATA / "structure_fgw" / "sample"
 EXTRA_TARGETS = DATA / "tta" / "targets_extra.csv"
-METHODS = ["fgw", "random", "global", "fgwmid", "fgwlow"]
+METHODS = ["fgw", "random", "global", "fgwmid", "fgwlow", "fgwmidnou", "moffgw", "moffgwnf", "mofglobal", "mofrandom"]
+# fgwmidnou: FGW alpha 0.25 within the pool, structures labelled with PBE+U (U_METALS rule) removed
+# moffgw:    FGW alpha 0.25 over MOF-off PBE frames of other frameworks (tta.select_mof), one per framework
+# moffgwnf:  as moffgw without frameworks of the target's empirical formula
+# mofglobal, mofrandom: MOF-off controls (global-vector nearest / random other frameworks)
 # FGW weight on geometry for the FGW-ranked selections (the search used 0.5); fgwmid and fgwlow, and
 # every FGW selection of an S target, are ranked within a candidate pool by tta.select_alpha
 METHOD_ALPHA = {"fgw": 0.5, "fgwmid": 0.25, "fgwlow": 0.1}
+# OMat24 follows Materials Project settings: PBE+U for oxides and fluorides of these metals
+U_METALS = {"Co", "Cr", "Fe", "Mn", "Mo", "Ni", "V", "W"}
 PILOT = ["Q6", "Q3", "Q4", "Q1"]          # queries with meaningful FGW neighbours (first round)
 SEARCH_TARGETS = PILOT + ["Q2", "Q5", "Q7", "Q8", "Q9", "Q10"]
 N_TRAIN, N_VALID = 20, 5
@@ -49,6 +55,16 @@ VARIANTS = {
                  cfg={"lora": True, "lora_rank": 4, "lora_alpha": 1.0}, epochs=30),
     "sw": dict(desc="stress weight 1000 instead of 10", cfg={"stress_weight": 1000}, epochs=30),
 }
+
+
+def elements(formula):
+    return set(re.findall(r"[A-Z][a-z]?", formula))
+
+
+def plus_u(formula):
+    """True if OMat24 labels a structure of this formula with PBE+U (oxide or fluoride of a U metal)."""
+    e = elements(formula)
+    return bool(e & U_METALS) and bool(e & {"O", "F"})
 
 
 def extra_targets():

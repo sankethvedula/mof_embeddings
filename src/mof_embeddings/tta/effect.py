@@ -19,35 +19,40 @@ share that also contain the target's metal (frac_plus_u_target_metal, from the f
 per-structure settings are not read). Results are also reported separately for targets whose metal
 is a +U metal, and the force change is related to frac_plus_u_target_metal for those targets.
 
+One selection on many targets (--cohorts fgwmid): every target with that selection at --lr, the
+change after 6 and after 60 epochs, by the round that added the target (search queries Q1-Q10,
+round 3: S targets with all five selections, round 4: further S targets with this selection only)
+and by target metal (+U metal or not).
+
   $PY -m mof_embeddings.tta.effect [--lr 3e-5]
   -> data/tta/effect/changes.csv (per run), summary.csv, paired.csv, effect_lr<lr>.png,
      by_metal_group.csv, plus_u_lr<lr>.png
+  $PY -m mof_embeddings.tta.effect --cohorts fgwmid [--lr 3e-5]
+  -> data/tta/effect/cohorts_<method>.csv (per target), cohorts_<method>_summary.csv,
+     cohorts_<method>.png
+
+Weight interpolation (--interp fgwmid): the models of tta.interpolate, w = (1 - lambda) w_foundation +
+lambda w_finetuned(epoch), scored like the runs; change per lambda and epoch over all targets and by
+target metal. lambda = 0 and 1 are checked against the foundation and fine-tuned evaluations.
+  $PY -m mof_embeddings.tta.effect --interp fgwmid [--lr 3e-5]
+  -> data/tta/effect/interp_<method>.csv (per target), interp_<method>_summary.csv, interp_<method>.png
 """
 import argparse
-import re
 
 import numpy as np
 import pandas as pd
 
 from mof_embeddings.config import DATA
-from mof_embeddings.tta.common import METHODS, N_TRAIN, TARGETS, run_dir, targets_table
+from mof_embeddings.tta.common import METHODS, N_TRAIN, TARGETS, U_METALS, elements, plus_u, run_dir, targets_table
 
 OUT = DATA / "tta" / "effect"
 METRICS = [("target_force_mae", "force MAE"), ("target_force_rmse", "force RMSE"),
            ("query_force_mae", "force MAE, query frame"), ("target_energy_mae_meV", "energy MAE (raw)"),
            ("target_energy_mae_offset_free_meV", "energy MAE (offset-free)"),
            ("target_stress_mae_meV_A3", "stress MAE")]
-PAIRS = [("fgw", "random"), ("fgwlow", "random"), ("fgw", "global"), ("fgwlow", "global"), ("fgwlow", "fgw")]
-U_METALS = {"Co", "Cr", "Fe", "Mn", "Mo", "Ni", "V", "W"}
-
-
-def elements(formula):
-    return set(re.findall(r"[A-Z][a-z]?", formula))
-
-
-def plus_u(formula):
-    e = elements(formula)
-    return bool(e & U_METALS) and bool(e & {"O", "F"})
+PAIRS = [("fgw", "random"), ("fgwlow", "random"), ("fgw", "global"), ("fgwlow", "global"), ("fgwlow", "fgw"),
+         ("fgwmidnou", "fgwmid"), ("moffgw", "fgwmid"), ("moffgw", "fgwmidnou"),
+         ("moffgw", "mofrandom"), ("moffgw", "mofglobal"), ("moffgwnf", "mofrandom"), ("mofglobal", "mofrandom")]
 
 
 def set_features():
@@ -57,6 +62,9 @@ def set_features():
     for t in TARGETS:
         for m in METHODS:
             path = run_dir(t, m) / "sets.csv"
+            same = run_dir(t, m) / "same_as.txt"
+            if same.exists():                    # identical set stored under another selection
+                path = run_dir(t, same.read_text().strip()) / "sets.csv"
             if not path.exists():
                 continue
             f = pd.read_csv(path).query("split == 'train'").formula
@@ -66,9 +74,10 @@ def set_features():
     return pd.DataFrame(rows)
 
 
-def changes(epochs=60):
+def changes(epochs=60, s=None):
+    """% change of every metric after `epochs` epochs versus the foundation model, per run."""
     from mof_embeddings.tta.compare import summarise
-    s = summarise(TARGETS)
+    s = summarise(TARGETS) if s is None else s
     s = s[s.n_train == N_TRAIN]
     base = s[s.epoch == "foundation"].drop_duplicates("target").set_index("target")
     last = s[s.epoch.astype(str) == str(epochs - 1)]
@@ -77,7 +86,145 @@ def changes(epochs=60):
         b = base.loc[r.target]
         rows.append(dict(target=r.target, method=r.method, lr=r.lr, seed=r.seed,
                          **{m: 100 * (getattr(r, m) / b[m] - 1) for m, _ in METRICS}))
-    return pd.DataFrame(rows)
+        for m in METHODS:                        # a selection whose set is identical (same_as.txt) shares the run
+            same = run_dir(r.target, m) / "same_as.txt"
+            if r.n_train == N_TRAIN and same.exists() and same.read_text().strip() == r.selection:
+                rows.append({**rows[-1], "method": m})
+    return pd.DataFrame(rows, columns=["target", "method", "lr", "seed"] + [m for m, _ in METRICS])
+
+
+def cohorts(method, lr):
+    """Change of every metric for one selection on all its targets, after 6 and 60 epochs."""
+    from mof_embeddings.tta.compare import summarise
+    s = summarise(TARGETS)
+    t = targets_table().set_index("query")
+    rnd = t["round"] if "round" in t else pd.Series(3, index=t.index)
+    per = []
+    for ep in [6, 60]:
+        ch = changes(ep, s)
+        ch = ch[(ch.method == method) & np.isclose(ch.lr, lr)]
+        ch = ch.groupby("target")[[m for m, _ in METRICS]].mean().reset_index()
+        ch["epochs"] = ep
+        per.append(ch)
+    per = pd.concat(per, ignore_index=True)
+    per["cohort"] = ["search queries" if q.startswith("Q") else f"round {int(rnd[q])} S targets"
+                     for q in per.target]
+    per["metal"] = t.metal.reindex(per.target).values
+    per["natoms"] = t.natoms.reindex(per.target).values
+    per["metal_group"] = np.where(per.metal.isin(U_METALS), "+U metal", "other metal")
+    rows = []
+    for ep, g in per.groupby("epochs"):
+        for key, col in [("all", None), ("cohort", "cohort"), ("metal", "metal_group")]:
+            for name, h in ([("all targets", g)] if col is None else g.groupby(col)):
+                for m, lab in METRICS:
+                    x = h[m].dropna()
+                    lo, hi = bootstrap_ci(x)
+                    rows.append(dict(epochs=ep, group=key, subset=name, metric=lab, n_targets=len(x),
+                                     mean=x.mean(), ci_lo=lo, ci_hi=hi, median=x.median(),
+                                     improved=int((x < 0).sum())))
+    return per, pd.DataFrame(rows)
+
+
+def interp(method, lr):
+    """% change versus the foundation model of every interpolated model, per target, lambda and epoch."""
+    import re as _re
+    from mof_embeddings.tta.compare import metrics
+    from mof_embeddings.tta.common import out_dir, target_dir
+    t = targets_table().set_index("query")
+    rows, check = [], []
+    for target in TARGETS:
+        d = out_dir(target, method, lr) / "interp"
+        f = target_dir(target) / "foundation_eval.csv"
+        if not d.exists() or not f.exists():
+            continue
+        found = pd.read_csv(f)
+        b = metrics(found[found.set == "target"], "target")
+        for path in sorted(d.glob("epoch*_l*.csv")):
+            ep, lam = _re.fullmatch(r"epoch(\d+)_l([0-9.]+)\.csv", path.name).groups()
+            m = metrics(pd.read_csv(path), "target")
+            rows.append(dict(target=target, epochs=int(ep) + 1, lam=float(lam), metal=t.metal[target],
+                             **{k: 100 * (m[k] / b[k] - 1) for k, _ in METRICS if k.startswith("target")}))
+            ref = out_dir(target, method, lr) / f"eval_epoch{ep}.csv"
+            if float(lam) in (0.0, 1.0) and ref.exists():
+                r = pd.read_csv(ref)
+                r = b if float(lam) == 0 else metrics(r[r.set == "target"], "target")
+                check.append(abs(m["target_force_mae"] / r["target_force_mae"] - 1))
+    per = pd.DataFrame(rows)
+    per["metal_group"] = np.where(per.metal.isin(U_METALS), "+U metal", "other metal")
+    print(f"check: lambda 0 / 1 reproduce the stored force MAE to {max(check) * 100:.3f}% (max over {len(check)})")
+    out = []
+    for (ep, lam), g in per.groupby(["epochs", "lam"]):
+        for name, h in [("all targets", g)] + list(g.groupby("metal_group")):
+            for m, lab in METRICS:
+                if m not in h:
+                    continue
+                x = h[m].dropna()
+                lo, hi = bootstrap_ci(x)
+                out.append(dict(epochs=ep, lam=lam, subset=name, metric=lab, n_targets=len(x), mean=x.mean(),
+                                ci_lo=lo, ci_hi=hi, improved=int((x < 0).sum()), worse_1pct=int((x > 1).sum())))
+    return per, pd.DataFrame(out)
+
+
+def plot_interp(sm, method):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from mof_embeddings.tta.compare import COL, INK, INK2, LAB, SURFACE, style
+    metrics = ["force MAE", "energy MAE (offset-free)", "stress MAE"]
+    fig, axes = plt.subplots(1, 3, figsize=(12, 3.6), facecolor=SURFACE)
+    for ax, lab in zip(axes, metrics):
+        for ep, ls in [(6, "-"), (60, "--")]:
+            for sub, a in [("all targets", 1.0), ("other metal", 0.55), ("+U metal", 0.3)]:
+                g = sm[(sm.metric == lab) & (sm.epochs == ep) & (sm.subset == sub)].sort_values("lam")
+                ax.plot(g.lam, g["mean"], ls, marker="o", ms=3.5, color=COL[method], alpha=a,
+                        label=f"{sub}, {ep} epochs")
+                if sub == "all targets":
+                    ax.fill_between(g.lam, g.ci_lo, g.ci_hi, color=COL[method], alpha=0.08 if ep == 60 else 0.15, lw=0)
+        ax.axhline(0, color=INK, lw=0.8)
+        ax.set_title(lab, fontsize=9.5, color=INK)
+        ax.set_xlabel("λ  (0 = MACE-OMAT-0, 1 = fine-tuned)", fontsize=8, color=INK2)
+        ax.set_ylabel("change vs MACE-OMAT-0 (%)", fontsize=8, color=INK2)
+        style(ax)
+    h, l = axes[0].get_legend_handles_labels()
+    fig.legend(h, l, loc="lower center", ncol=6, fontsize=7, frameon=False)
+    fig.suptitle(f"Weight interpolation, {LAB[method]}: mean change of target errors (band: 95% CI, all targets)",
+                 fontsize=10, color=INK)
+    fig.tight_layout(rect=(0, 0.08, 1, 1)); fig.savefig(OUT / f"interp_{method}.png", dpi=150, facecolor=SURFACE)
+    plt.close(fig)
+
+
+def plot_cohorts(sm, method, lr):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from mof_embeddings.tta.compare import COL, INK, INK2, LAB, SURFACE, style
+    metrics = ["force MAE", "energy MAE (offset-free)", "stress MAE", "energy MAE (raw)"]
+    subsets = list(dict.fromkeys(sm.subset))
+    fig, axes = plt.subplots(1, len(metrics), figsize=(3.6 * len(metrics), 0.42 * len(subsets) + 1.6),
+                             facecolor=SURFACE, sharey=True)
+    for ax, lab in zip(axes, metrics):
+        for k, (ep, mk) in enumerate([(6, "o"), (60, "s")]):
+            h = sm[(sm.metric == lab) & (sm.epochs == ep)].set_index("subset")
+            for i, sub in enumerate(subsets):
+                if sub not in h.index:
+                    continue
+                r = h.loc[sub]
+                y = i + (k - 0.5) * 0.3
+                ax.plot([r.ci_lo, r.ci_hi], [y, y], color=COL[method], lw=1.6, alpha=0.5 + 0.5 * k)
+                ax.scatter([r["mean"]], [y], marker=mk, s=26, color=COL[method], alpha=0.5 + 0.5 * k, zorder=3,
+                           label=f"after {ep} epochs" if i == 0 else None)
+        ax.axvline(0, color=INK, lw=0.9)
+        ax.set_yticks(range(len(subsets)))
+        ax.set_yticklabels([f"{s} ({int(sm[(sm.subset == s)].n_targets.max())})" for s in subsets], fontsize=7.5)
+        ax.set_title(lab, fontsize=9.5, color=INK)
+        ax.set_xlabel("change vs base model (%), mean, 95% CI", fontsize=7.5, color=INK2)
+        style(ax)
+    axes[0].invert_yaxis()
+    h, l = axes[0].get_legend_handles_labels()
+    fig.legend(h, l, loc="lower center", ncol=2, fontsize=8, frameon=False)
+    fig.suptitle(f"{LAB[method]}, 20 structures, lr {lr:g}: change of target errors on every target "
+                 "(negative = better; in brackets: targets)", fontsize=10, color=INK)
+    fig.tight_layout(rect=(0, 0.06, 1, 1)); fig.savefig(OUT / f"cohorts_{method}.png", dpi=150, facecolor=SURFACE); plt.close(fig)
 
 
 def per_target(ch):
@@ -196,8 +343,37 @@ def plot(sm, lr):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--lr", type=float, nargs="+", default=[3e-5])
+    parser.add_argument("--cohorts", metavar="METHOD", help="one selection on all its targets, by round and metal")
+    parser.add_argument("--interp", metavar="METHOD", help="weight interpolation of this selection's runs")
     args = parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
+    if args.interp:
+        per, sm = interp(args.interp, args.lr[0])
+        per.to_csv(OUT / f"interp_{args.interp}.csv", index=False)
+        sm.to_csv(OUT / f"interp_{args.interp}_summary.csv", index=False)
+        plot_interp(sm, args.interp)
+        sm["cell"] = [f"{m:+.1f} [{lo:+.1f},{hi:+.1f}] {k}/{n} w{w}" for m, lo, hi, k, n, w in
+                      zip(sm["mean"], sm.ci_lo, sm.ci_hi, sm.improved, sm.n_targets, sm.worse_1pct)]
+        pd.set_option("display.width", 250)
+        for sub in ["all targets", "other metal", "+U metal"]:
+            g = sm[(sm.subset == sub) & sm.metric.isin(["force MAE", "energy MAE (offset-free)", "stress MAE"])]
+            print(f"\n== {sub}: mean change % [95% CI] improved/targets, w = targets worse by > 1%")
+            print(g.pivot_table(index=["epochs", "lam"], columns="metric", values="cell", aggfunc="first").to_string())
+        return
+    if args.cohorts:
+        per, sm = cohorts(args.cohorts, args.lr[0])
+        per.to_csv(OUT / f"cohorts_{args.cohorts}.csv", index=False)
+        sm.to_csv(OUT / f"cohorts_{args.cohorts}_summary.csv", index=False)
+        plot_cohorts(sm, args.cohorts, args.lr[0])
+        sm["cell"] = [f"{m:+.1f} [{lo:+.1f},{hi:+.1f}] {k}/{n}" for m, lo, hi, k, n in
+                      zip(sm["mean"], sm.ci_lo, sm.ci_hi, sm.improved, sm.n_targets)]
+        pd.set_option("display.width", 250)
+        for ep in [6, 60]:
+            print(f"\n== {args.cohorts}, lr {args.lr[0]:g}, after {ep} epochs: mean change % [95% CI], improved/targets")
+            g = sm[sm.epochs == ep]
+            print(g.pivot(index="subset", columns="metric", values="cell")
+                  .reindex(columns=[l for _, l in METRICS]).reindex(list(dict.fromkeys(g.subset))).to_string())
+        return
     ch = changes().merge(set_features(), on=["target", "method"], how="left")
     ch.to_csv(OUT / "changes.csv", index=False)
     pt = per_target(ch)

@@ -67,6 +67,8 @@ def runs(target):
 def summarise(targets):
     rows = []
     for t in targets:
+        if not (target_dir(t) / "target.csv").exists():          # target set not built yet
+            continue
         tgt = pd.read_csv(target_dir(t) / "target.csv")
         query_frame = int(np.flatnonzero(tgt.is_query.values)[0])
         if not (target_dir(t) / "foundation_eval.csv").exists():
@@ -90,9 +92,14 @@ def summarise(targets):
 
 
 INK, INK2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e1e0d9", "#fcfcfb"
-COL = {"fgw": "#2a78d6", "global": "#eb6834", "random": "#898781", "fgwmid": "#1baf7a", "fgwlow": "#7c4dc4"}
+COL = {"fgw": "#2a78d6", "global": "#eb6834", "random": "#898781", "fgwmid": "#1baf7a", "fgwlow": "#7c4dc4",
+       "fgwmidnou": "#c2410c", "moffgw": "#0e7490",
+       "moffgwnf": "#155e75", "mofglobal": "#a16207", "mofrandom": "#78716c"}
 LAB = {"fgw": "nearest by FGW (α 0.5)", "global": "nearest by global vector", "random": "random OMat24",
-       "fgwmid": "nearest by FGW (α 0.25)", "fgwlow": "nearest by FGW (α 0.1)"}
+       "fgwmid": "nearest by FGW (α 0.25)", "fgwlow": "nearest by FGW (α 0.1)",
+       "fgwmidnou": "FGW (α 0.25), no +U labels", "moffgw": "FGW (α 0.25), other MOF-off frameworks",
+       "moffgwnf": "FGW (α 0.25), MOF-off, no same-formula frameworks",
+       "mofglobal": "global vector, other MOF-off frameworks", "mofrandom": "random MOF-off frameworks"}
 
 
 def style(ax):
